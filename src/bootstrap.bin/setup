@@ -1,0 +1,20 @@
+#!/bin/sh
+##<help>
+## setup - Initialize the bootstrap registry, current selection file and history.
+## Usage: toolkit setup bootstrap
+## Store state under UTIL_PATH/bootstrap; preserve existing registrations and selection.
+##</help>
+set -e
+. "$(dirname "$0")/../lib/locking.sh"
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+umask 077
+STATE_DIR="$UTIL_PATH/bootstrap"
+mkdir -p "$STATE_DIR"
+file_lock "$STATE_DIR/lock"
+mkdir -p "$STATE_DIR/repos" "$STATE_DIR/history"
+for repo in "$STATE_DIR"/repos/*; do
+    [ -f "$repo/path" ] || continue
+    mkdir -p -- "$repo/databases"
+done
+: >> "$STATE_DIR/current_repo"
+echo 'bootstrap initialized'

@@ -1,0 +1,125 @@
+#!/bin/sh
+
+TOOLKIT="$(basename "$0")"
+BIN_DIR="$(dirname "$0")/$TOOLKIT.bin"
+ORG_ARGS="$*"
+
+record_history() (
+    if [ -n "$TOOLKIT_HIST_LOCK" ] || [ -z "$UTIL_PATH" ]; then
+        return 0
+    fi
+
+    state_name="$TOOLKIT"
+    if [ -f "$BIN_DIR/state-name" ]; then
+        state_name=$(cat "$BIN_DIR/state-name")
+    fi
+
+    case "$state_name" in
+        ''|.|..|*/*)
+            return 0
+            ;;
+    esac
+
+    history_dir="$UTIL_PATH/$state_name/history"
+    if [ ! -d "$history_dir" ]; then
+        return 0
+    fi
+
+    if [ "$TOOLKIT" = encrypt ] || [ "$ACTION" = history ]; then
+        return 0
+    fi
+
+    if ! command -v encrypt >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # History is best effort and must not prevent the command from running.
+    record=$(printf '%s\t%s %s' "$(date +'%Y-%m-%d %H:%M:%S')" "$TOOLKIT" "$ORG_ARGS")
+    encrypted=$(printf '%s' "$record" | TOOLKIT_HIST_LOCK=1 encrypt encrypt 2>/dev/null) || return 0
+
+    umask 077
+    if [ -n "$encrypted" ]; then
+        printf '%s\n' "$encrypted" >> "$history_dir/log" 2>/dev/null || true
+    fi
+)
+
+# Rotate the original arguments to remove help flags without losing quoting.
+show_help=0
+for argument in "$@"; do
+    shift
+    case "$argument" in
+        --help)
+            show_help=1
+            ;;
+        *)
+            set -- "$@" "$argument"
+            ;;
+    esac
+done
+
+if [ "$show_help" = 1 ]; then
+    if [ "${1:-}" = help ]; then
+        shift
+    fi
+    exec "$BIN_DIR/$TOOLKIT-help" "$@"
+fi
+
+ACTION="$1"
+if [ $# -gt 0 ]; then
+    shift
+fi
+if [ -z "$ACTION" ]; then
+    ACTION="help"
+fi
+
+if [ "$ACTION" = 'help' ]; then
+    exec "$BIN_DIR/$TOOLKIT-help" "$@"
+fi
+
+if [ -f "$BIN_DIR/$TOOLKIT-$ACTION" ]; then
+    record_history
+    exec "$BIN_DIR/validate" "$BIN_DIR/$TOOLKIT-$ACTION" "$@"
+fi
+
+TARGET="$BIN_DIR/$ACTION"
+CHAIN="$ACTION"
+
+while [ -d "$TARGET" ]; do
+    if [ -z "$1" ]; then
+        break
+    fi
+
+    if [ -f "$TARGET/$1" ]; then
+        CMD="$1"
+        shift
+        record_history
+        exec "$BIN_DIR/validate" "$TARGET/$CMD" "$@"
+    elif [ -d "$TARGET/$1" ]; then
+        CHAIN="$CHAIN $1"
+        TARGET="$TARGET/$1"
+        shift
+    else
+        break
+    fi
+done
+
+if [ -d "$TARGET" ]; then
+    echo "usage: $TOOLKIT $CHAIN <action>"
+    echo ""
+    for f in "$TARGET"/*; do
+        name=$(basename "$f")
+        line=$(awk '
+            /^##<help>/ { in_help = 1; next }
+            in_help {
+                sub(/^##/, "")
+                print
+                exit
+            }
+        ' "$f")
+        printf "    %-12s %s\n" "$name" "$line"
+    done
+    exit 1
+fi
+
+echo "error: invalid action: $ACTION"
+exit 1

@@ -1,0 +1,1 @@
+# Python dependencies for cli/consumer.py, installed into cli/.venv by make install.python.

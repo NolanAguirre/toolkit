@@ -1,0 +1,51 @@
+#!/bin/sh
+##<help>
+## allocate ls - List allocated ports, names and messages grouped by domain.
+## Usage: port allocate ls
+## Group reservations by domain and sort each group by port number.
+## Include port names and descriptions; show empty domains as well.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+if [ "$#" -ne 0 ]; then
+    port_error 'usage: port allocate ls'
+fi
+domains=$(
+    for config in "$PORT_ROOT"/*/.domain.json; do
+        [ -f "$config" ] || continue
+        basename "$(dirname "$config")"
+    done
+    jq -r '.domain' "$PORT_INDEX"
+)
+domains=$(printf '%s\n' "$domains" | sort -u)
+[ -n "$domains" ] || { echo 'no allocations'; exit 0; }
+first=1
+while IFS= read -r domain; do
+    [ "$first" = 1 ] || printf '\n'
+    first=0
+    printf '%s:\n' "$domain"
+    records=$(jq -sc --arg domain "$domain" 'sort_by(.port)[] | select(.domain == $domain)' "$PORT_INDEX")
+    if [ -z "$records" ]; then
+        echo '  (no allocated ports)'
+        continue
+    fi
+    rows=$(
+        while IFS= read -r record; do
+            record=$(port_metadata "$record")
+            # Escape tabs and newlines so messages remain on one display row.
+            printf '%s\n' "$record" | jq -r \
+                '[.port, (.name // "-"), .message] | map(if . == "" then "-" else . end) | @tsv'
+        done <<RECORDS
+$records
+RECORDS
+    )
+    printf '%s\n' "$rows" | awk -F '\t' '
+        BEGIN { width=4 }
+        { ports[NR]=$1; names[NR]=$2; messages[NR]=$3; if (length($2)>width) width=length($2) }
+        END {
+            printf "  %-5s  %-*s  %s\n", "PORT", width, "NAME", "MESSAGE"
+            for (i=1; i<=NR; i++) printf "  %-5s  %-*s  %s\n", ports[i], width, names[i], messages[i]
+        }'
+done <<DOMAINS
+$domains
+DOMAINS

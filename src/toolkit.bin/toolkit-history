@@ -1,0 +1,70 @@
+#!/bin/sh
+
+##<help>
+## history - Show recent command history, newest first, or clear it.
+## Usage: <tool> history [count | --clear]
+## Show the last 20 entries by default. Count must be a positive integer.
+## Reading encrypted entries requires encrypt and may prompt for the key password.
+## --clear removes this tool's history files without changing its other state.
+##</help>
+
+HISTORY_DIR="$STATE_DIR/history"
+
+if [ ! -d "$HISTORY_DIR" ]; then
+    echo "error: history directory not found at $HISTORY_DIR" >&2
+    exit 1
+fi
+
+case "$1" in
+    --clear)
+        rm -f "$HISTORY_DIR"/*
+        echo "history cleared"
+        exit 0
+        ;;
+esac
+
+COUNT=20
+if [ $# -gt 0 ]; then
+    COUNT="$1"
+fi
+
+if [ "$COUNT" = 0 ] || ! printf '%s' "$COUNT" | grep -zq '^[0-9][0-9]*$'; then
+    echo "error: history count must be a positive integer" >&2
+    exit 1
+fi
+
+LINES=$(cat "$HISTORY_DIR"/* 2>/dev/null)
+
+if [ -z "$LINES" ]; then
+    echo "no history"
+    exit 0
+fi
+
+TOTAL=$(printf '%s\n' "$LINES" | wc -l | tr -d ' ')
+
+if [ "$COUNT" -gt "$TOTAL" ]; then
+    COUNT="$TOTAL"
+fi
+
+SELECTED=$(printf '%s\n' "$LINES" | tail -n "$COUNT")
+
+if ! command -v encrypt >/dev/null 2>&1; then
+    echo "error: encrypt is required to decrypt history" >&2
+    exit 1
+fi
+
+DECODED=$(
+    printf '%s\n' "$SELECTED" | while IFS= read -r line; do
+        printf '%s' "$line" | TOOLKIT_HIST_LOCK=1 encrypt decrypt || exit 1
+        printf '\n'
+    done
+) || exit 1
+
+printf '%s\n' "$DECODED" | awk '
+    { lines[NR] = $0 }
+    END {
+        for (i = NR; i >= 1; i--) {
+            printf "%4d  %s\n", i, lines[i]
+        }
+    }
+'

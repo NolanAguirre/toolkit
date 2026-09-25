@@ -1,0 +1,106 @@
+#!/bin/sh
+##<help>
+## ui add - Scaffold a JavaScript React app with Vite beneath ui/.
+## Usage: bootstrap ui add <name> [--support=component-library]
+## Run from the repository root; its port domain must already exist.
+## Allocate a stable ui/<name> port and serve at /<name>/ on localhost.
+## Create env-dir/default and env-dir/$USER, plus install/build/start Make targets.
+## component-library: link the existing root library; use src/index.js in development
+## and built dist in production. Requires its package.json and Makefile.
+## Requires npm and port. Install dependencies separately with make install.
+## Reject existing paths. Clean up failed staging; retain any reserved port.
+## Print the created path. --support also accepts a separate value.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+[ "$#" -gt 0 ] || bootstrap_error 'usage: bootstrap ui add <name> [--support=component-library]'
+name=$1
+shift
+if ! printf '%s' "$name" | grep -zq '^[a-z0-9][a-z0-9._-]*$'; then
+    bootstrap_error 'UI names must start with a lowercase letter or digit and contain only lowercase letters, digits, dots, underscores or hyphens'
+fi
+library=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --support)
+            [ "$#" -ge 2 ] || bootstrap_error 'missing value for --support'
+            value=$2
+            shift 2
+            ;;
+        --support=*)
+            value=${1#*=}
+            shift
+            ;;
+        *)
+            bootstrap_error "unknown option: $1"
+            ;;
+    esac
+    case "$value" in
+        component-library)
+            library=1
+            ;;
+        *)
+            bootstrap_error "unsupported --support value: $value"
+            ;;
+    esac
+done
+if [ -z "$USER" ] || [ "$USER" = . ] || [ "$USER" = .. ] || printf '%s\n' "$USER" | grep -q /; then
+    bootstrap_error 'USER must be a nonempty directory name'
+fi
+command -v npm >/dev/null 2>&1 || bootstrap_error 'npm is required'
+command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+root=$(pwd -P)
+domain=${root##*/}
+bootstrap_name "$domain"
+path="$root/ui/$name"
+if [ -e "$path" ] || [ -L "$path" ]; then
+    bootstrap_error "path already exists: $path"
+fi
+if [ "$library" = 1 ]; then
+    if [ ! -f "$root/component-library/package.json" ] || [ ! -f "$root/component-library/src/index.js" ] || [ ! -f "$root/component-library/Makefile" ]; then
+        bootstrap_error 'component-library support requires component-library/{package.json,src/index.js,Makefile} at the repository root'
+    fi
+fi
+mkdir -p -- "$root/ui"
+pending=$(mktemp -d "$root/ui/.ui.XXXXXX")
+trap 'rm -rf -- "$pending"' 0
+trap 'exit 1' HUP INT TERM
+app="$pending/$name"
+mkdir -p -- "$app/src" "$app/env-dir/default" "$app/env-dir/$USER"
+template="$(dirname "$0")/../template/ui"
+if [ "$library" = 1 ]; then
+    cp -- "$template/../makefile/ui-component-library" "$app/Makefile"
+else
+    cp -- "$template/../makefile/ui" "$app/Makefile"
+fi
+cp -- "$template/main.jsx" "$app/src/main.jsx"
+cp -- "$template/style.css" "$app/src/style.css"
+cp -- "$template/gitignore" "$app/.gitignore"
+sed "s/__NAME__/$name/g" "$template/index.html" > "$app/index.html"
+sed "s/__NAME__/$name/g" "$template/App.jsx" > "$app/src/App.jsx"
+sed "s/__NAME__/$name/g" "$template/vite.config.js" > "$app/vite.config.js"
+sed "s/__NAME__/$name/g" "$template/package.json" > "$app/package.json"
+cp -- "$template/README.md" "$app/README.md"
+if [ "$library" = 1 ]; then
+    cp -- "$template/component-library.js" "$app/component-library.js"
+    # Add the library config without coupling the plain scaffold to it.
+    sed 's/plugins: \[react()\]/plugins: [componentLibrary(), react()]/' "$app/vite.config.js" > "$app/vite.config.tmp"
+    printf '%s\n' "import componentLibrary from './component-library.js'" > "$app/vite.config.js"
+    cat "$app/vite.config.tmp" >> "$app/vite.config.js"
+    rm -- "$app/vite.config.tmp"
+    (cd -- "$app" && npm pkg set 'dependencies.component-library=file:../../component-library' 'dependencies.react-virtuoso=^4.14.0') >&2
+    printf '\n%s\n' "import 'component-library/dist/component-library.css'" >> "$app/src/main.jsx"
+    cat "$template/library.md" >> "$app/README.md"
+fi
+port=$(port allocate pull "$domain" -n "ui/$name" -m "$domain/ui/$name")
+printf '%s\n' "$port" > "$app/env-dir/default/PORT"
+printf '%s\n' localhost > "$app/env-dir/default/HOST"
+if [ "$USER" != default ]; then
+    cp -- "$app/env-dir/default/PORT" "$app/env-dir/$USER/PORT"
+    cp -- "$app/env-dir/default/HOST" "$app/env-dir/$USER/HOST"
+fi
+mv -T -n -- "$app" "$path"
+if [ -d "$app" ]; then
+    bootstrap_error "path appeared during scaffolding: $path"
+fi
+printf '%s\n' "$path"

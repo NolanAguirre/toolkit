@@ -1,0 +1,134 @@
+#!/bin/sh
+##<help>
+## start - Open configured workspaces, terminal tabs and application windows.
+## Usage: desktop start [--dry-run] [--force] [--login] [workspace]
+## Skip previously launched entries during this login unless --force is supplied.
+## A workspace's tabs share one terminal window. Background commands have no window placement.
+##</help>
+set -e
+. "$(dirname "$0")/../lib/desktop.sh"
+dry_run=0
+force=0
+login=0
+selected=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dry-run)
+            dry_run=1
+            ;;
+        --force)
+            force=1
+            ;;
+        --login)
+            login=1
+            ;;
+        -*)
+            desktop_error "unknown option: $1"
+            ;;
+        *)
+            [ -z "$selected" ] || desktop_error 'specify at most one workspace name'
+            desktop_workspace "$1"
+            selected=$1
+            ;;
+    esac
+    shift
+done
+# Validate all selected configuration before launching any commands.
+for workspace in "$STATE_DIR"/workspaces/*; do
+    [ -d "$workspace" ] || continue
+    name=$(basename "$workspace")
+    [ -z "$selected" ] || [ "$selected" = "$name" ] || continue
+    desktop_name "$name"
+    number=$(sed -n '1p' "$workspace/config")
+    repo=$(sed -n '2p' "$workspace/config")
+    desktop_number "$number"
+    [ -d "$repo" ] || desktop_error "missing directory: $repo"
+    for command in "$workspace"/commands/*; do
+        [ -d "$command" ] || continue
+        desktop_name "$(basename "$command")"
+        kind=$(cat "$command/kind")
+        desktop_kind "$kind"
+        sh -n "$command/run"
+        if [ "$dry_run" -eq 1 ]; then
+            printf 'Workspace %s [%s] %s (%s) in %s\n' "$number" "$name" "$(basename "$command")" "$kind" "$repo"
+            cat "$command/run"
+        fi
+    done
+done
+[ "$dry_run" -eq 0 ] || exit 0
+: "${XDG_RUNTIME_DIR:?Run from your desktop login without sudo}"
+session=${XDG_SESSION_ID:-desktop}
+desktop_name "$session"
+export DESKTOP_RUN="$XDG_RUNTIME_DIR/toolkit-desktop/$session"
+mkdir -p "$DESKTOP_RUN/done"
+attempt=0
+until desktop_bus Status >/dev/null 2>&1; do
+    [ "$login" -eq 1 ] && [ "$attempt" -lt 30 ] || desktop_error 'workspace helper unavailable; run desktop install, then log out and back in'
+    sleep 2
+    attempt=$((attempt + 1))
+done
+available=$(gsettings get org.gnome.desktop.wm.preferences num-workspaces)
+[ "$(gsettings get org.gnome.mutter dynamic-workspaces)" = false ] || desktop_error 'configure fixed GNOME workspaces first'
+# Snapshot scripts so editing configuration later cannot affect queued terminal tabs.
+snapshot=$(mktemp -d "$DESKTOP_RUN/config.XXXXXX")
+cp -R "$STATE_DIR/workspaces" "$snapshot/"
+trap 'desktop_bus Cancel >/dev/null 2>&1 || true' 0
+trap 'exit 1' HUP INT TERM
+for workspace in "$snapshot"/workspaces/*; do
+    [ -d "$workspace" ] || continue
+    name=$(basename "$workspace")
+    [ -z "$selected" ] || [ "$selected" = "$name" ] || continue
+    number=$(sed -n '1p' "$workspace/config")
+    [ "$number" -le "$available" ] || desktop_error "workspace $number does not exist (configured: $available)"
+done
+for workspace in "$snapshot"/workspaces/*; do
+    [ -d "$workspace" ] || continue
+    name=$(basename "$workspace")
+    [ -z "$selected" ] || [ "$selected" = "$name" ] || continue
+    number=$(sed -n '1p' "$workspace/config")
+    repo=$(sed -n '2p' "$workspace/config")
+    index=$((number - 1))
+    mkdir -p "$DESKTOP_RUN/done/$name"
+    set -- gnome-terminal
+    first=1
+    for command in "$workspace"/commands/*; do
+        [ -d "$command" ] || continue
+        [ "$(cat "$command/kind")" = tab ] || continue
+        if [ "$first" -eq 1 ]; then
+            set -- "$@" --window
+            first=0
+        else
+            set -- "$@" --tab
+        fi
+        payload=". $(desktop_quote "$command/run"); result=\$?; printf '\\nCommand exited (%s).\\n' \"\$result\"; exec $(desktop_quote "${SHELL:-/bin/bash}") -i"
+        launch="$(desktop_quote "${SHELL:-/bin/bash}") -ic $(desktop_quote "$payload")"
+        set -- "$@" --title "$name — $(basename "$command")" --working-directory "$repo" --command "$launch"
+    done
+    if [ "$first" -eq 0 ]; then
+        if [ "$force" -eq 1 ] || [ ! -f "$DESKTOP_RUN/done/$name/terminal" ]; then
+            printf 'Workspace %s: %s terminal\n' "$number" "$name"
+            desktop_place terminal "$index" "$@"
+            touch "$DESKTOP_RUN/done/$name/terminal"
+        fi
+    fi
+    for command in "$workspace"/commands/*; do
+        [ -d "$command" ] || continue
+        kind=$(cat "$command/kind")
+        [ "$kind" != tab ] || continue
+        id=$(basename "$command")
+        marker="$DESKTOP_RUN/done/$name/command-$id"
+        [ "$force" -eq 1 ] || [ ! -f "$marker" ] || continue
+        printf 'Workspace %s: %s %s\n' "$number" "$name" "$id"
+        payload="cd $(desktop_quote "$repo") && . $(desktop_quote "$command/run")"
+        case "$kind" in
+            background)
+                nohup "${SHELL:-/bin/bash}" -ic "$payload" 9>&- >> "$DESKTOP_RUN/launch.log" 2>&1 < /dev/null &
+                ;;
+            *)
+                desktop_place "$kind" "$index" "${SHELL:-/bin/bash}" -ic "$payload"
+                ;;
+        esac
+        touch "$marker"
+    done
+done
+printf 'Desktop launch complete. Log: %s/launch.log\n' "$DESKTOP_RUN"

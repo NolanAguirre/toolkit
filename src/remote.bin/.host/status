@@ -1,0 +1,90 @@
+#!/bin/sh
+##<help>
+## status - Inspect service prerequisites, current runtime and s6 state.
+## Usage: remote status <repo>
+## Print tab-separated service, setup state, runtime state and expected PORT.
+##</help>
+command -v s6-svstat >/dev/null || fail 'install s6 first'
+command -v s6-svscanctl >/dev/null || fail 'install s6 first'
+result=0
+if ! s6-svscanctl -a /var/service 2>/dev/null; then
+    printf '%s\n' 'error: s6-svscan is not running for /var/service' >&2
+    result=1
+fi
+for entry in "$@"; do
+    service_names "$entry"
+    if ! (require_users && require_layout); then
+        printf '%s\tmissing-setup\t-\t%s\n' "$service" "$port"
+        result=1
+        continue
+    fi
+    if ! (
+        require_file_target "$base/run"
+        require_file_target "$base/log/run"
+        require_file_target "$base/bin/deploy"
+        [ -x "$base/run" ] &&
+            [ -x "$base/log/run" ] &&
+            [ -x "$base/bin/deploy" ] &&
+            [ "$(file_mode "$base/run")" = 755 ] &&
+            [ "$(file_mode "$base/bin/deploy")" = 755 ] &&
+            [ "$(file_mode "$base/log/run")" = 755 ]
+    ); then
+        printf '%s\tmissing-service\t-\t%s\n' "$service" "$port"
+        result=1
+        continue
+    fi
+    if ! (require_file_target "$base/env/PORT" && require_file_target "$base/down"); then
+        printf '%s\tinvalid-service-files\t-\t%s\n' "$service" "$port"
+        result=1
+        continue
+    fi
+    actual=-
+    if [ -f "$base/env/PORT" ]; then
+        actual=$(cat "$base/env/PORT")
+    fi
+    if [ "$actual" != "$port" ]; then
+        printf '%s\tport-drift\t-\t%s\n' "$service" "$port"
+        result=1
+        continue
+    fi
+    if ! (
+        [ -L "/var/service/$unit" ] &&
+            [ "$(readlink "/var/service/$unit")" = "$base" ] &&
+            s6-svscanctl -a /var/service >/dev/null 2>&1
+    ); then
+        printf '%s\tmissing-supervision\t-\t%s\n' "$service" "$port"
+        result=1
+        continue
+    fi
+    if ! state=$(s6-svstat "$base" 2>&1) || ! log_state=$(s6-svstat "$base/log" 2>&1); then
+        printf '%s\tsupervisor-unavailable\t%s\t%s\n' "$service" "$state" "$port"
+        result=1
+        continue
+    fi
+    case "$log_state" in
+        up*)
+            ;;
+        *)
+            printf '%s\tlogger-down\t%s\t%s\n' "$service" "$log_state" "$port"
+            result=1
+            continue
+            ;;
+    esac
+    runtime_state=$state
+    case "$state" in
+        up*)
+            ;;
+        down*)
+            if [ ! -x "$base/server/current/run" ]; then
+                runtime_state=awaiting-runtime
+            else
+                result=1
+            fi
+            ;;
+        *)
+            result=1
+            ;;
+    esac
+    printf '%s\tready\t%s\t%s\n' "$service" "$runtime_state" "$port"
+done
+exit "$result"

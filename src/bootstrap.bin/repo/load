@@ -1,0 +1,35 @@
+#!/bin/sh
+##<help>
+## load - Register an existing directory or select a registered repo; print its path.
+## Usage: bootstrap repo load <name|path>
+## Paths use their directory basename as the repo name. Use ./name to force a path.
+## Loading leaves repository files and port reservations unchanged.
+## Store the canonical absolute path and select it in current_repo.
+## Reject missing directories and names already registered to another path.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+if [ "$#" -ne 1 ]; then
+    bootstrap_error 'usage: bootstrap repo load <name|path>'
+fi
+if printf '%s\n' "$1" | grep -q /; then
+    path=$1
+else
+    bootstrap_name "$1"
+    if [ -d "$STATE_DIR/repos/$1" ]; then
+        path=$(cat "$STATE_DIR/repos/$1/path")
+    else
+        path=./$1
+    fi
+fi
+if [ ! -d "$path" ]; then
+    bootstrap_error "repo directory does not exist: $path"
+fi
+path=$(CDPATH= cd -- "$path" && pwd -P)
+# Replacing tabs and newlines must leave the path unchanged.
+if [ "$path" != "$(printf '%s' "$path" | tr '\t\n' '  ')" ]; then
+    bootstrap_error 'repo paths cannot contain tabs or newlines'
+fi
+name=${path##*/}
+bootstrap_name "$name"
+bootstrap_register "$name" "$path"

@@ -1,0 +1,32 @@
+#!/bin/sh
+
+##<help>
+## setup - Record toolkit source and installation paths for initial setup.
+## Usage: sh src/toolkit.bin/setup
+## Require UTIL_PATH and TOOLKIT_SRC_PATH; TOOLKIT_BIN_PATH defaults to ~/.bin.
+## Write toolkit-path and bin-path under UTIL_PATH/toolkit and create history storage.
+##</help>
+
+set -e
+
+if [ -z "$UTIL_PATH" ]; then
+    echo "error: UTIL_PATH is not set"
+    exit 1
+fi
+
+if [ -z "$TOOLKIT_SRC_PATH" ]; then
+    echo "error: TOOLKIT_SRC_PATH is not set"
+    exit 1
+fi
+
+TOOLKIT_STATE_DIR="$UTIL_PATH/toolkit"
+BIN_PATH="${TOOLKIT_BIN_PATH:-$HOME/.bin}"
+
+mkdir -p "$TOOLKIT_STATE_DIR"
+mkdir -p "$TOOLKIT_STATE_DIR/history"
+mkdir -p "$TOOLKIT_STATE_DIR/tests"
+
+echo "$BIN_PATH" > "$TOOLKIT_STATE_DIR/bin-path"
+echo "$TOOLKIT_SRC_PATH" > "$TOOLKIT_STATE_DIR/toolkit-path"
+
+echo "toolkit setup complete"

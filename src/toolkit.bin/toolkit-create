@@ -1,0 +1,93 @@
+#!/bin/sh
+
+##<help>
+## create - Create a tool with shared dispatch, help, and history.
+## Usage: toolkit create <name>
+## Create <name>.bin in the configured source, with setup and validation scripts.
+## Link the shared dispatcher, help and history commands. Existing paths cause an error.
+## Run toolkit build, then toolkit setup <name>, to install and initialize the tool.
+##</help>
+
+set -e
+
+NAME="$1"
+
+if [ -z "$NAME" ]; then
+    echo "usage: toolkit-create <name>"
+    exit 1
+fi
+
+BIN_DIR="$TOOLKIT_SRC_PATH/$NAME.bin"
+
+if [ -e "$BIN_DIR" ]; then
+    echo "error: $BIN_DIR already exists"
+    exit 1
+fi
+
+mkdir -p "$BIN_DIR"
+echo "created bin directory: $BIN_DIR"
+
+cat > "$BIN_DIR/setup" <<EOF
+#!/bin/sh
+
+set -e
+
+if [ -z "\$UTIL_PATH" ]; then
+    echo "error: UTIL_PATH is not set"
+    exit 1
+fi
+
+STATE="\$UTIL_PATH/$NAME"
+
+if [ -d "\$STATE" ]; then
+    echo "error: $NAME already exists"
+    exit 1
+fi
+
+mkdir -p "\$STATE"
+mkdir -p "\$STATE/history"
+echo "initialized $NAME"
+EOF
+chmod a+x "$BIN_DIR/setup"
+echo "created $NAME.bin/setup"
+
+cat > "$BIN_DIR/validate" <<EOF
+#!/bin/sh
+
+set -e
+
+if [ -z "\$UTIL_PATH" ]; then
+    echo "error: UTIL_PATH is not set"
+    exit 1
+fi
+
+STATE_DIR="\$UTIL_PATH/$NAME"
+
+if [ ! -d "\$STATE_DIR" ]; then
+    echo "error: $NAME not initialized, run toolkit setup first"
+    exit 1
+fi
+
+export STATE_DIR
+
+exec "\$@"
+EOF
+chmod a+x "$BIN_DIR/validate"
+echo "created $NAME.bin/validate"
+
+ln -s ../toolkit.bin/toolkit-help "$BIN_DIR/$NAME-help"
+echo "created $NAME-help"
+
+ln -s ../toolkit.bin/toolkit-history "$BIN_DIR/$NAME-history"
+echo "created $NAME-history"
+
+if [ -e "$TOOLKIT_SRC_PATH/$NAME" ]; then
+    echo "error: $TOOLKIT_SRC_PATH/$NAME already exists"
+    exit 1
+fi
+
+DEST="$TOOLKIT_SRC_PATH/$NAME"
+ln -s toolkit "$DEST"
+echo "created $NAME"
+
+echo "toolkit $NAME created"

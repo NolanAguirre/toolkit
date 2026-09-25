@@ -1,0 +1,24 @@
+#!/bin/sh
+##<help>
+## setup - Initialize the age identity, public recipient and encryption history.
+## Usage: toolkit setup encrypt
+## Require age and age-keygen. Keep existing keys under UTIL_PATH/encrypt.
+## New private keys have no password; use encrypt password set to protect one.
+##</help>
+set -e
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+command -v age >/dev/null
+command -v age-keygen >/dev/null
+umask 077
+STATE_DIR="$UTIL_PATH/encrypt"
+mkdir -p "$STATE_DIR/history"
+chmod 700 "$STATE_DIR" "$STATE_DIR/history"
+if [ ! -e "$STATE_DIR/identity" ]; then
+    age-keygen -o "$STATE_DIR/identity" 2>/dev/null
+fi
+if ! head -n 1 "$STATE_DIR/identity" | grep -q '^-----BEGIN AGE ENCRYPTED FILE-----$'; then
+    chmod 600 "$STATE_DIR/identity"
+    age-keygen -y "$STATE_DIR/identity" > "$STATE_DIR/recipient"
+fi
+[ -s "$STATE_DIR/recipient" ] || { echo "error: recipient key missing" >&2; exit 1; }
+echo "encrypt initialized"

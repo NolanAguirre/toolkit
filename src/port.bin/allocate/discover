@@ -1,0 +1,117 @@
+#!/bin/sh
+##<help>
+## allocate discover - Register development PORT files below the current directory.
+## Usage: port allocate discover [--create-domain]
+## The current directory's basename must be an existing port domain.
+## Search env-dir and env-dev; use ENV_USER (or USER), then default if PORT is missing.
+## Skip missing or empty PORT files. Never execute environment files or modify them.
+## Skip .git, node_modules, .venv and venv directories; do not follow directory symlinks.
+## Validate all ports and ownership before writing; repeated discovery is safe.
+## Store domain/relative/service as the message and print each reserved port.
+## Existing allocations are retained, including those no longer found on disk.
+## --create-domain creates a missing 100-port domain after validating the scan.
+## Reject service identity conflicts; preserve existing reservation metadata.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+create_domain=0
+case "$*" in
+    '')
+        [ "$#" -eq 0 ] || port_error 'usage: port allocate discover [--create-domain]'
+        ;;
+    --create-domain)
+        [ "$#" -eq 1 ] || port_error 'usage: port allocate discover [--create-domain]'
+        create_domain=1
+        ;;
+    *)
+        port_error 'usage: port allocate discover [--create-domain]'
+        ;;
+esac
+root=$(pwd -P)
+domain=${root##*/}
+port_domain "$domain"
+if [ "$create_domain" = 0 ]; then
+    port_require_domain "$domain"
+fi
+env_user=${ENV_USER:-${USER:-default}}
+if [ "$env_user" = . ] || [ "$env_user" = .. ] || printf '%s\n' "$env_user" | grep -q /; then
+    port_error 'ENV_USER or USER must be a directory name'
+fi
+# Stage the scan while validate holds the port lock. JSON preserves unusual paths.
+scan=$(mktemp "$STATE_DIR/.discover.XXXXXX")
+trap 'rm -f -- "$scan"' 0
+trap 'exit 1' HUP INT TERM
+find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv \) -prune -o \
+    -type d \( -name env-dir -o -name env-dev \) -prune -exec sh -c '
+        set -e
+        env_user=$1
+        domain=$2
+        shift 2
+        for directory in "$@"; do
+            file="$directory/$env_user/PORT"
+            [ -e "$file" ] || file="$directory/default/PORT"
+            [ -e "$file" ] || continue
+            [ -f "$file" ] && [ -r "$file" ] || {
+                printf "error: cannot read %s\n" "$file" >&2; exit 1;
+            }
+            value=$(cat -- "$file")
+            [ -n "$value" ] || continue
+            service=${directory%/*}
+            service=${service#./}
+            message=$domain
+            [ "$service" = . ] || message="$domain/$service"
+            jq -cn --arg value "$value" --arg message "$message" --arg file "$file" \
+                "{value:\$value, message:\$message, file:\$file}"
+        done
+    ' sh "$env_user" "$domain" {} + > "$scan"
+# Normalize numbers and reject ambiguous duplicates before any reservations change.
+atomic_write "$scan" jq -cs '
+    map(. + {port: (if (.value | test("^[0-9]+$")) then (.value | tonumber)
+                   else error("invalid PORT in " + .file) end)}
+        | if .port >= 1 and .port <= 65535 then .
+          else error("invalid PORT in " + .file) end)
+    | sort_by(.port)
+    | if (map(.message) | unique | length) == length then .
+      else error("multiple environment directories specify ports for the same service") end
+    | if (map(.port) | unique | length) == length then .[]
+      else error("multiple environment directories specify the same PORT") end
+' "$scan"
+# Consult current metadata as well as journal identity (legacy discoveries have no name).
+allocated=$(
+    while IFS= read -r record; do
+        [ -n "$record" ] || continue
+        port_metadata "$record"
+    done < "$PORT_INDEX"
+)
+printf '%s\n' "$allocated" | jq -se --arg domain "$domain" --slurpfile found "$scan" '
+    . as $allocated |
+    [$found[] as $f | $allocated[]
+     | select(.port == $f.port and .domain != $domain)]
+    | if length == 0 then true
+      else error("port \(.[0].port) is already allocated to \(.[0].domain)") end
+    | [$found[] as $f | $allocated[]
+       | select(.domain == $domain)
+       | ($f.message | if . == $domain then "." else ltrimstr($domain + "/") end) as $service
+       | select((.port != $f.port and
+                  (.name == $service or .message == $f.message or
+                   (($service | split("/") | last) == "nginx" and .message == "nginx"))) or
+                (.port == $f.port and
+                  ((.name != null and .name != $service) or
+                   (.name == null and (.message | startswith($domain + "/")) and
+                    .message != $f.message))))]
+    | if length == 0 then true
+      else error("configured service conflicts with existing allocation on port \(.[0].port)") end
+' >/dev/null
+if [ "$create_domain" = 1 ] && [ ! -f "$PORT_ROOT/$domain/.domain.json" ]; then
+    sh "$(dirname "$0")/create" "$domain" -c 100 >&2
+fi
+# Invoke the sibling directly: validate already holds the lock for this batch.
+while IFS= read -r record; do
+    port=$(printf '%s\n' "$record" | jq -r '.port')
+    message=$(printf '%s\n' "$record" | jq -r '.message')
+    if [ -n "$(port_record "$port")" ]; then
+        sh "$(dirname "$0")/set" "$domain" "$port"
+    else
+        sh "$(dirname "$0")/set" "$domain" "$port" -m "$message"
+    fi
+done < "$scan"

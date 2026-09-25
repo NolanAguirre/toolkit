@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+export STATE_DIR="$UTIL_PATH/encrypt"
+if [ ! -f "$STATE_DIR/identity" ]; then
+    echo "error: encrypt is not initialized; run toolkit setup encrypt" >&2
+    exit 1
+fi
+command -v age >/dev/null
+command -v age-keygen >/dev/null
+# Encryption operations must never recursively record history.
+export TOOLKIT_HIST_LOCK=1
+exec "$@"

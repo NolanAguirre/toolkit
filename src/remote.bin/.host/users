@@ -1,0 +1,13 @@
+#!/bin/sh
+##<help>
+## users - Create locked runtime, service-owner and log users.
+## Usage: remote setup users <repo>
+## Existing accounts with conflicting identities are rejected.
+##</help>
+for entry in "$@"; do
+    service_names "$entry"
+    create_user "$runtime" runtime "$base/data"
+    create_user "$owner" owner "$base/server"
+    create_user "$logger" log "$base/log/main"
+    printf '%s\tusers-ready\n' "$service"
+done

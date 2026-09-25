@@ -1,0 +1,91 @@
+#!/bin/sh
+# Sourced by validate with the remote state lock held. Sync is independent of bootstrap.
+. "$REMOTE_BIN/../lib/remote-sync.sh"
+[ -d "$REMOTE_STATE/sync" ] || remote_error 'run toolkit setup remote first'
+case "$action" in
+    ls)
+        [ "$#" -eq 0 ] || remote_error 'usage: remote sync ls'
+        export REMOTE_STATE
+        exec "$command" "$@"
+        ;;
+    create|edit)
+        [ "$#" -ge 3 ] || remote_error 'usage: remote sync create|edit <name> <ssh-alias> <remote-directory> [entry ...]'
+        ;;
+    rm)
+        [ "$#" -eq 1 ] || remote_error 'usage: remote sync rm <name>'
+        ;;
+    push|pull)
+        [ "$#" -eq 2 ] || remote_error 'usage: remote sync push|pull <name> <local-directory>'
+        ;;
+    *)
+        remote_error 'unknown sync command'
+        ;;
+esac
+remote_token "$1" || remote_error 'invalid sync profile name'
+SYNC_PROFILE="$REMOTE_STATE/sync/$1"
+export REMOTE_BIN REMOTE_STATE SYNC_PROFILE
+case "$action" in
+    rm)
+        exec "$command" "$@"
+        ;;
+    create|edit)
+        name=$1
+        shift
+        SYNC_TARGET=$1
+        SYNC_DIRECTORY=$2
+        shift 2
+        if [ "$#" -eq 0 ]; then
+            set -- Assets Packages ProjectSettings
+        fi
+        ;;
+    push|pull)
+        [ -f "$SYNC_PROFILE" ] || remote_error 'sync profile missing; use remote sync create'
+        [ -d "$2" ] && [ ! -L "$2" ] || remote_error 'local directory must already exist and must not be a symlink'
+        SYNC_LOCAL=$(CDPATH= cd -- "$2" && pwd -P)
+        exec 7<"$SYNC_PROFILE"
+        IFS= read -r SYNC_TARGET <&7 || remote_error 'invalid sync profile'
+        IFS= read -r SYNC_DIRECTORY <&7 || remote_error 'invalid sync profile'
+        set --
+        while IFS= read -r entry <&7; do
+            set -- "$@" "$entry"
+        done
+        exec 7<&-
+        [ "$#" -gt 0 ] || remote_error 'sync profile has no entries'
+        command -v sftp >/dev/null 2>&1 || remote_error 'OpenSSH sftp is required'
+        ;;
+esac
+remote_token "$SYNC_TARGET" || remote_error 'SSH target must be a config alias'
+remote_sync_path "$SYNC_DIRECTORY" || remote_error 'remote directory needs forward slashes and no glob, quote or control characters'
+case "$SYNC_DIRECTORY" in
+    /*|[a-zA-Z]:/*)
+        ;;
+    *)
+        remote_error 'remote directory must be absolute, for example C:/Projects/My Game'
+        ;;
+esac
+for entry in "$@"; do
+    remote_sync_entry "$entry" || remote_error "entry must be a literal top-level file or directory name: $entry"
+    case "$action" in
+        push|pull)
+            path="$SYNC_LOCAL/$entry"
+            if [ "$action" = push ]; then
+                [ -e "$path" ] || remote_error "local entry missing: $entry"
+            fi
+            # Do not read through source links or overwrite through destination links.
+            if [ -e "$path" ] || [ -L "$path" ]; then
+                special=$(find "$path" ! -type f ! -type d -print)
+                [ -z "$special" ] || remote_error "local entry contains a symlink or special file: $entry"
+            fi
+            ;;
+    esac
+done
+export SYNC_TARGET SYNC_DIRECTORY SYNC_LOCAL
+case "$action" in
+    create|edit)
+        exec "$command" "$name" "$SYNC_TARGET" "$SYNC_DIRECTORY" "$@"
+        ;;
+    push|pull)
+        # Validated entries are passed as arguments, never evaluated as shell code.
+        exec "$command" "$@"
+        ;;
+esac

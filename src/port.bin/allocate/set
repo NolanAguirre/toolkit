@@ -1,0 +1,48 @@
+#!/bin/sh
+##<help>
+## allocate set - Reserve a specific port globally, even outside this domain's automatic block.
+## Usage: port allocate set <domain> <port> [-m <message>]
+## The domain must exist and the port must be between 1 and 65535.
+## Repeating a reservation for its owner is safe; another owner causes an error.
+## -m/--message updates the description. Print only the reserved port number.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+if [ "$#" -lt 2 ]; then
+    port_error 'usage: port allocate set <domain> <port> [-m <message>]'
+fi
+domain=$1
+port=$(port_number "$2")
+shift 2
+port_require_domain "$domain"
+message=
+message_set=0
+while [ "$#" -gt 0 ]; do
+    if [ "$#" -lt 2 ]; then
+        port_error "missing value for $1"
+    fi
+    case "$1" in
+        -m|--message)
+            message=$2
+            message_set=1
+            ;;
+        *)
+            port_error "unknown option: $1"
+            ;;
+    esac
+    shift 2
+done
+record=$(port_record "$port")
+new=0
+if [ -n "$record" ]; then
+    owner=$(printf '%s\n' "$record" | jq -r '.domain')
+    if [ "$owner" != "$domain" ]; then
+        port_error "port $port is already allocated to $owner"
+    fi
+else
+    record=$(jq -cn --arg domain "$domain" --argjson port "$port" --arg message "$message" \
+        --arg created "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+        '{port:$port, domain:$domain, name:null, message:$message, automatic:false, created_at:$created}')
+    new=1
+fi
+port_save "$record" "$new" "$message_set" "$message"

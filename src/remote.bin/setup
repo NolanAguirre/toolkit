@@ -1,0 +1,15 @@
+#!/bin/sh
+##<help>
+## setup - Initialize local remote target state.
+## Usage: toolkit setup remote
+## Preserve targets; this does not contact a host.
+##</help>
+set -e
+. "$(dirname "$0")/../lib/locking.sh"
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+umask 077
+mkdir -p "$UTIL_PATH/remote"
+file_lock "$UTIL_PATH/remote/lock"
+mkdir -p "$UTIL_PATH/remote/targets" "$UTIL_PATH/remote/history"
+mkdir -p "$UTIL_PATH/remote/sync"
+printf '%s\n' 'remote initialized'

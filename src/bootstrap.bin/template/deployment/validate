@@ -1,0 +1,25 @@
+#!/bin/sh
+##<help>
+## validate - Serialize host operations with toolkit host preparation/deployment.
+## Usage: ./validate <script>
+##</help>
+set -e
+PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+export PATH
+cd "$(dirname "$0")"
+. ./toolkit/remote-host.sh
+[ "$(id -u)" -eq 0 ] || fail 'run host targets with sudo'
+case "$1" in
+    install|setup|migrate|activate|start|stop|restart|status|deploy)
+        ;;
+    *)
+        fail 'unknown deployment operation'
+        ;;
+esac
+repo=__REPO__
+if [ "${TOOLKIT_REMOTE_LOCKED:-}" != 1 ]; then
+    [ ! -L /var/run/toolkit-remote.lock ] || fail 'host lock must not be a symlink'
+    exec s6-setlock -d 9 /var/run/toolkit-remote.lock env TOOLKIT_REMOTE_LOCKED=1 "$(pwd -P)/validate" "$@"
+fi
+. ./toolkit/validate
+exec "./$1"

@@ -1,0 +1,14 @@
+#!/bin/sh
+# The transport (or standalone deployment validator) holds the s6-setlock lock.
+case "$(uname -s)" in
+    Linux|FreeBSD)
+        ;;
+    *)
+        fail 'supported hosts are Linux and FreeBSD'
+        ;;
+esac
+[ "$(id -u)" -eq 0 ] || fail 'root access through sudo -n is required'
+[ "${TOOLKIT_REMOTE_LOCKED:-}" = 1 ] || fail 'host operation must run under s6-setlock'
+umask 022
+command -v getent >/dev/null || fail 'getent is required'
+root_group=$(id -gn root)

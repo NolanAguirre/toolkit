@@ -1,0 +1,26 @@
+#!/bin/sh
+##<help>
+## command edit - Replace a configured shell command, or edit it using EDITOR.
+## Usage: desktop command edit <workspace> <name> [shell-command]
+## Validate shell syntax before publishing; preserve the previous command on failure.
+## EDITOR must name one executable; command scripts use POSIX shell syntax.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+. "$(dirname "$0")/../../lib/files.sh"
+[ "$#" -eq 2 ] || [ "$#" -eq 3 ] || desktop_error 'usage: desktop command edit <workspace> <name> [shell-command]'
+desktop_workspace "$1"
+desktop_name "$2"
+target="$WORKSPACE_DIR/commands/$2/run"
+[ -f "$target" ] || desktop_error "unknown command: $2"
+staging=$(mktemp "$STATE_DIR/.edit.XXXXXX")
+trap 'rm -f -- "$staging"' 0
+if [ "$#" -eq 3 ]; then
+    printf '%s\n' "$3" > "$staging"
+else
+    cp "$target" "$staging"
+    "${EDITOR:-vi}" "$staging"
+fi
+[ -s "$staging" ] || desktop_error 'command must not be empty'
+sh -n "$staging"
+atomic_write "$target" cat "$staging"

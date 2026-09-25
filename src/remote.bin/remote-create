@@ -1,0 +1,13 @@
+#!/bin/sh
+##<help>
+## create - Create the SSH target for a bootstrap repository.
+## Usage: remote create <repo> <ssh-config-alias>
+## SSH configuration supplies hostname, user, port and identity; no passwords are stored.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/files.sh"
+if [ -e "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
+    echo 'error: target already exists; use remote edit' >&2
+    exit 1
+fi
+atomic_write "$REMOTE_STATE/targets/$REMOTE_REPO" printf '%s\n' "$2"

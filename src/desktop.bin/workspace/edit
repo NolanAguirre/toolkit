@@ -1,0 +1,21 @@
+#!/bin/sh
+##<help>
+## workspace edit - Change a workspace assignment and working directory.
+## Usage: desktop workspace edit <name> <number> <directory>
+## Preserve all configured commands.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+. "$(dirname "$0")/../../lib/files.sh"
+[ "$#" -eq 3 ] || desktop_error 'usage: desktop workspace edit <name> <number> <directory>'
+desktop_workspace "$1"
+desktop_number "$2"
+[ -d "$3" ] || desktop_error "directory does not exist: $3"
+repo=$(cd -- "$3" && pwd -P)
+case "$repo" in
+    *'
+'*)
+        desktop_error 'directory must not contain a newline'
+        ;;
+esac
+atomic_write "$WORKSPACE_DIR/config" printf '%s\n%s\n' "$2" "$repo"

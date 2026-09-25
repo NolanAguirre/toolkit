@@ -1,0 +1,218 @@
+#!/bin/sh
+##<help>
+## service add - Scaffold a service beneath the current repository's services directory.
+## Usage: bootstrap service add <name> --type=nodejs [--support=http] [--support=fs] [--support=db] [--support=python]
+## Options accept =value or a separate value. --support may be repeated.
+## Run npm init -y and create env-dir/default and env-dir/$USER with matching values.
+## Include a simple Makefile with help, install, build and background start targets.
+## python: add cli/fsqueue.py, a stub cli/consumer.py, cli/requirements.txt and .gitignore;
+## the Makefile gains install.python (cli/.venv) and a foreground consumer target.
+## Write QUEUE_DIR=/tmp/<domain>/queues/<name> and GPU_LOCK_PATH (default /tmp/gpu.lock,
+## overridable from the invoking shell to share one lock). Requires python3.
+## Existing service paths are rejected.
+## http: allocate a stable services/<name> port in the current directory's domain;
+## write env-dir/default/PORT and HOST (localhost). The port domain must exist.
+## fs: write env-dir/default/WRITE_DIR as the expanded $HOME/.<name> path.
+## db: read the same-name database registration under the current repository's bootstrap state.
+## PostgreSQL writes DATABASE_URL; SQLite expands the registered repo-relative path into DB_FILE.
+## Copy these values to env-dir/$USER, loaded by make start (ENV_USER selects an override).
+## Values are copied at creation time; later registry/Sqitch edits do not change service environments.
+## Requires a registered repository. Missing database registrations are rejected; Sqitch is not imported.
+## Passwords belong outside bootstrap state; generated PostgreSQL connections are password-free.
+## Create the matching database scaffold first with bootstrap db add <name> --support=<backend>.
+## No database connection, migrations, database port allocation or .env file creation.
+## Requires npm; creates no application code or dependencies beyond the python stubs. Print the service path.
+## Failed scaffolding is cleaned up; a reserved port is retained if publishing fails.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+if [ "$#" -lt 1 ]; then
+    bootstrap_error 'usage: bootstrap service add <name> --type=nodejs [--support=http] [--support=fs] [--support=db] [--support=python]'
+fi
+name=$1
+shift
+if ! printf '%s' "$name" | grep -zq '^[a-z0-9][a-z0-9._-]*$'; then
+    bootstrap_error 'service names must start with a lowercase letter or digit and contain only lowercase letters, digits, dots, underscores or hyphens'
+fi
+type=
+http=0
+fs=0
+db=0
+python=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --type|--support)
+            if [ "$#" -lt 2 ]; then
+                bootstrap_error "missing value for $1"
+            fi
+            option=$1
+            value=$2
+            shift 2
+            ;;
+        --type=*|--support=*)
+            # Split --option=value at its first equals sign.
+            option=${1%%=*}
+            value=${1#*=}
+            shift
+            ;;
+        *)
+            bootstrap_error "unknown option: $1"
+            ;;
+    esac
+
+    case "$option" in
+        --type)
+            if [ "$value" != nodejs ]; then
+                bootstrap_error "unsupported $option value: $value"
+            fi
+            type=nodejs
+            ;;
+        --support)
+            case "$value" in
+                http)
+                    http=1
+                    ;;
+                fs)
+                    fs=1
+                    ;;
+                db)
+                    db=1
+                    ;;
+                python)
+                    python=1
+                    ;;
+                *)
+                    bootstrap_error "unsupported $option value: $value"
+                    ;;
+            esac
+            ;;
+    esac
+done
+if [ "$type" != nodejs ]; then
+    bootstrap_error '--type=nodejs is required'
+fi
+if [ -z "$USER" ] || [ "$USER" = . ] || [ "$USER" = .. ] || printf '%s\n' "$USER" | grep -q /; then
+    bootstrap_error 'USER must be a nonempty directory name'
+fi
+command -v npm >/dev/null 2>&1 || bootstrap_error 'npm is required'
+if [ "$python" = 1 ]; then
+    command -v python3 >/dev/null 2>&1 || bootstrap_error 'python3 is required for python support'
+fi
+root=$(pwd -P)
+path="$root/services/$name"
+if [ -e "$path" ] || [ -L "$path" ]; then
+    bootstrap_error "path already exists: $path"
+fi
+if [ "$db" = 1 ]; then
+    repo=$(bootstrap_repo_entry "$root")
+    entry="$repo/databases/$name"
+    if [ ! -f "$entry/engine" ]; then
+        bootstrap_error "database $name is not registered for this repository; create it with bootstrap db add $name --support=postgres or --support=sqlite (existing database directories require explicit registration, not automatic Sqitch discovery)"
+    fi
+    engine=$(cat "$entry/engine")
+    case "$engine" in
+        postgres)
+            [ -f "$entry/database_url" ] || bootstrap_error "missing database_url in registration for $name"
+            db_key=DATABASE_URL
+            db_value=$(cat "$entry/database_url")
+            case "$db_value" in
+                postgresql://*|postgres://*)
+                    ;;
+                *)
+                    bootstrap_error "invalid PostgreSQL database_url in registration for $name"
+                    ;;
+            esac
+            authority=${db_value#*://}
+            authority=${authority%%/*}
+            case "$authority" in
+                *@*)
+                    username=${authority%@*}
+                    case "$username" in
+                        *:*|*%*)
+                            bootstrap_error 'registered database URLs must not contain passwords or encoded user information; configure credentials outside bootstrap state'
+                            ;;
+                    esac
+                    ;;
+            esac
+            case "$db_value" in
+                *\?*|*\#*)
+                    bootstrap_error 'registered PostgreSQL URLs must not contain query options or fragments; configure runtime options separately'
+                    ;;
+            esac
+            ;;
+        sqlite)
+            [ -f "$entry/db_file" ] || bootstrap_error "missing db_file in registration for $name"
+            db_key=DB_FILE
+            db_file=$(cat "$entry/db_file")
+            case "$db_file" in
+                "db/$name/"*)
+                    db_value="$root/$db_file"
+                    ;;
+                *)
+                    bootstrap_error "expected a repository-relative db/$name/ file in registration for $name"
+                    ;;
+            esac
+            ;;
+        *)
+            bootstrap_error "invalid engine in database registration for $name; expected postgres or sqlite"
+            ;;
+    esac
+    if [ -z "$db_value" ] || [ "$db_value" != "$(printf '%s' "$db_value" | tr '\t\r\n' '   ')" ]; then
+        bootstrap_error "database registration for $name must contain a single nonempty connection value"
+    fi
+fi
+if [ "$fs" = 1 ]; then
+    if ! printf '%s' "$HOME" | grep -zq '^/'; then
+        bootstrap_error 'HOME must be an absolute path for fs support'
+    fi
+fi
+if [ "$http" = 1 ] || [ "$python" = 1 ]; then
+    domain=${root##*/}
+    bootstrap_name "$domain"
+fi
+if [ "$http" = 1 ]; then
+    command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+fi
+mkdir -p -- "$root/services"
+pending=$(mktemp -d "$root/services/.service.XXXXXX")
+trap 'rm -rf -- "$pending"' 0
+trap 'exit 1' HUP INT TERM
+mkdir -p -- "$pending/$name/env-dir/default" "$pending/$name/env-dir/$USER"
+if [ "$db" = 1 ]; then
+    printf '%s\n' "$db_value" > "$pending/$name/env-dir/default/$db_key"
+fi
+if [ "$fs" = 1 ]; then
+    printf '%s\n' "${HOME%/}/.$name" > "$pending/$name/env-dir/default/WRITE_DIR"
+fi
+if [ "$python" = 1 ]; then
+    printf '%s\n' "/tmp/$domain/queues/$name" > "$pending/$name/env-dir/default/QUEUE_DIR"
+    printf '%s\n' "${GPU_LOCK_PATH:-/tmp/gpu.lock}" > "$pending/$name/env-dir/default/GPU_LOCK_PATH"
+fi
+(cd -- "$pending/$name" && npm init -y && npm pkg set 'scripts.start=node index.js') >&2
+template=$(dirname "$0")/../template
+makefile=$type
+if [ "$python" = 1 ]; then
+    makefile=$type-python
+    mkdir -p -- "$pending/$name/cli"
+    cp -- "$template/python/fsqueue.py" "$template/python/consumer.py" "$template/python/requirements.txt" "$pending/$name/cli/"
+    cp -- "$template/python/gitignore" "$pending/$name/.gitignore"
+fi
+cat "$template/makefile/$makefile" > "$pending/$name/Makefile"
+if [ "$http" = 1 ]; then
+    # The child acquires the port lock while our parent retains the bootstrap lock.
+    port=$(port allocate pull "$domain" -n "services/$name" -m "$domain/services/$name")
+    printf '%s\n' "$port" > "$pending/$name/env-dir/default/PORT"
+    printf '%s\n' localhost > "$pending/$name/env-dir/default/HOST"
+fi
+if [ "$USER" != default ]; then
+    for file in "$pending/$name/env-dir/default"/*; do
+        [ -f "$file" ] || continue
+        cp -- "$file" "$pending/$name/env-dir/$USER/"
+    done
+fi
+# Never overwrite a path created by another process while npm was running.
+mv -T -n -- "$pending/$name" "$path"
+if [ -d "$pending/$name" ]; then
+    bootstrap_error "path appeared during scaffolding: $path"
+fi
+printf '%s\n' "$path"

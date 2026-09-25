@@ -1,0 +1,8 @@
+#!/bin/sh
+##<help>
+## rm - Remove a local directory-copy profile.
+## Usage: remote sync rm <name>
+## Leave local and remote project files untouched.
+##</help>
+set -e
+rm -- "$SYNC_PROFILE"

@@ -1,0 +1,43 @@
+#!/bin/sh
+##<help>
+## allocate rm - Release a global port or an entire domain, atomically rewriting the index.
+## Usage: port allocate rm (-p|--port <port> | -d|--domain <domain>)
+## Supply exactly one option. Removing a port keeps its domain and automatic block.
+## Removing a domain releases its block and every port it owns, including fixed ports.
+## Released ports can be allocated again. Running processes are not stopped.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+if [ "$#" -ne 2 ]; then
+    port_error 'usage: port allocate rm (-p <port> | -d <domain>)'
+fi
+case "$1" in
+    -p|--port)
+        port=$(port_number "$2")
+        record=$(port_record "$port")
+        if [ -z "$record" ]; then
+            port_error "port $port is not allocated"
+        fi
+        domain=$(printf '%s\n' "$record" | jq -r '.domain')
+        # Raw-line filtering preserves every other reservation byte-for-byte.
+        atomic_write "$PORT_INDEX" jq -Rr --argjson port "$port" \
+            'select((fromjson | .port) != $port)' "$PORT_INDEX"
+        rm -f "$PORT_ROOT/$domain/$port"
+        printf 'removed port %s from %s\n' "$port" "$domain"
+        ;;
+    -d|--domain)
+        domain=$2
+        port_domain "$domain"
+        if [ ! -d "$PORT_ROOT/$domain" ]; then
+            port_error "unknown domain: $domain"
+        fi
+        count=$(jq -s --arg domain "$domain" '[.[] | select(.domain == $domain)] | length' "$PORT_INDEX")
+        atomic_write "$PORT_INDEX" jq -Rr --arg domain "$domain" \
+            'select((fromjson | .domain) != $domain)' "$PORT_INDEX"
+        rm -rf "$PORT_ROOT/$domain"
+        printf 'removed domain %s (%s ports)\n' "$domain" "$count"
+        ;;
+    *)
+        port_error 'usage: port allocate rm (-p <port> | -d <domain>)'
+        ;;
+esac

@@ -1,0 +1,23 @@
+#!/bin/sh
+##<help>
+## pull - Copy selected remote files and directories into a local project.
+## Usage: remote sync pull <name> <local-directory>
+## Overwrite matching files in place; preserve destination-only files, including generated data.
+## Both project directories must exist; an empty local directory can receive a new checkout.
+## No conflict detection, deletion propagation or rollback. Pull before changing machines.
+##</help>
+set -e
+batch=$(mktemp "$REMOTE_STATE/.sftp.XXXXXX")
+trap 'rm -f -- "$batch"' 0
+trap 'exit 1' HUP INT TERM
+printf 'cd "%s"\n' "$SYNC_DIRECTORY" > "$batch"
+# Check that all selected remote entries exist before overwriting local files.
+for entry in "$@"; do
+    printf 'ls "./%s"\n' "$entry" >> "$batch"
+done
+for entry in "$@"; do
+    printf 'get -R "./%s" "."\n' "$entry" >> "$batch"
+done
+cd -- "$SYNC_LOCAL"
+sftp -b "$batch" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
+    "$SYNC_TARGET" >&2

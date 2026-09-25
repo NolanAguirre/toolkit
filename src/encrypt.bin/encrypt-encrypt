@@ -1,0 +1,18 @@
+#!/bin/sh
+##<help>
+## encrypt - Encrypt standard input as one encoded history record using age.
+## Usage: encrypt encrypt < input
+## Read plaintext from stdin and print a single ecrypt-v1: encoded line to stdout.
+## Use the stored public recipient; encryption does not require the key password.
+##</help>
+set -e
+if [ "$#" -ne 0 ]; then
+    echo "usage: encrypt encrypt < input" >&2
+    exit 1
+fi
+recipient=$(cat "$STATE_DIR/recipient")
+# Capture successful encryption before emitting a record; no plaintext fallback.
+ciphertext=$(age --encrypt --armor -r "$recipient")
+printf 'ecrypt-v1:'
+printf '%s\n' "$ciphertext" | base64 | tr -d '\n'
+printf '\n'

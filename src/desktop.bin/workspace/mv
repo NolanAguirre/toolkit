@@ -1,0 +1,12 @@
+#!/bin/sh
+##<help>
+## workspace mv - Rename a workspace entry, preserving its commands and number.
+## Usage: desktop workspace mv <name> <new-name>
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+[ "$#" -eq 2 ] || desktop_error 'usage: desktop workspace mv <name> <new-name>'
+desktop_workspace "$1"
+desktop_name "$2"
+[ ! -e "$STATE_DIR/workspaces/$2" ] || desktop_error "workspace already exists: $2"
+mv -T -- "$WORKSPACE_DIR" "$STATE_DIR/workspaces/$2"

@@ -1,0 +1,20 @@
+#!/bin/sh
+##<help>
+## ls - List registered repositories as tab-separated current marker, name and path.
+## Usage: bootstrap repo ls
+## The current repo is marked *. Missing directories remain listed for removal.
+## Other repos are marked -. An empty registry produces no output.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+if [ "$#" -ne 0 ]; then
+    bootstrap_error 'usage: bootstrap repo ls'
+fi
+current=$(cat "$STATE_DIR/current_repo")
+for entry in "$STATE_DIR"/repos/*; do
+    [ -d "$entry" ] || continue
+    name=${entry##*/}
+    marker=-
+    [ "$current" != "$name" ] || marker='*'
+    printf '%s\t%s\t%s\n' "$marker" "$name" "$(cat "$entry/path")"
+done

@@ -1,0 +1,47 @@
+#!/bin/sh
+##<help>
+## service - Write root-owned s6 service and log runners plus the repository PORT.
+## Usage: remote setup service <repo> <service|--all>
+## Require users and directories; generate bin/deploy, preserving existing app runners.
+##</help>
+command -v s6-setuidgid >/dev/null || fail 'install s6 first'
+command -v s6-envdir >/dev/null || fail 'install s6 first'
+command -v s6-log >/dev/null || fail 'install s6 first'
+command -v s6-setlock >/dev/null || fail 'install s6 first'
+command -v s6-svok >/dev/null || fail 'install s6 first'
+command -v s6-svc >/dev/null || fail 'install s6 first'
+for entry in "$@"; do
+    service_names "$entry"
+    require_users
+    require_layout
+    require_file_target "$base/run"
+    require_file_target "$base/log/run"
+    require_file_target "$base/env/PORT"
+    require_file_target "$base/down"
+    require_file_target "$base/bin/deploy"
+    require_file_target "$base/bin/deploy-prepare"
+done
+for entry in "$@"; do
+    service_names "$entry"
+    # The application owns its stable runner; setup must preserve it.
+    if [ ! -f "$base/run" ]; then
+        atomic_to "$base/run" "root:$root_group" 755 cat <<RUN
+#!/bin/sh
+set -e
+exec 2>&1
+exec s6-envdir ./env s6-setuidgid '$runtime' ./server/current/run
+RUN
+    fi
+    atomic_to "$base/log/run" "root:$root_group" 755 cat <<RUN
+#!/bin/sh
+set -e
+exec s6-setuidgid '$logger' s6-log t s1048576 n100 ./main
+RUN
+    atomic_to "$base/bin/deploy" "root:$root_group" 755 service_deploy_script
+    if [ "$port" = - ]; then
+        rm -f -- "$base/env/PORT"
+    else
+        atomic_to "$base/env/PORT" "root:$root_group" 644 printf '%s\n' "$port"
+    fi
+    printf '%s\tservice-ready\t%s\n' "$service" "$base"
+done

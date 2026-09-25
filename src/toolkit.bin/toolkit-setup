@@ -1,0 +1,99 @@
+#!/bin/sh
+
+##<help>
+## setup - Initialize tool state or add missing defaults without overwriting files.
+## Usage: toolkit setup <name> | --all
+## Initialize one installed tool, or every installed tool with a setup script.
+## For existing state, add missing directories and default files without replacing files.
+##</help>
+
+set -e
+
+setup_one() {
+    NAME="$1"
+    SETUP="$TOOLKIT_BIN_PATH/$NAME.bin/setup"
+
+    if [ ! -f "$SETUP" ]; then
+        echo "error: setup script not found for $NAME" >&2
+        exit 1
+    fi
+
+    STATE_NAME="$NAME"
+    if [ -f "$TOOLKIT_BIN_PATH/$NAME.bin/state-name" ]; then
+        STATE_NAME=$(cat "$TOOLKIT_BIN_PATH/$NAME.bin/state-name")
+    fi
+
+    case "$STATE_NAME" in
+        ''|.|..|*/*)
+            echo "error: invalid state name" >&2
+            return 1
+            ;;
+    esac
+
+    TARGET_STATE="$UTIL_PATH/$STATE_NAME"
+
+    if [ ! -d "$TARGET_STATE" ]; then
+        "$SETUP"
+        return 0
+    fi
+
+    SANDBOX="$(mktemp -d)"
+    PATCH_LOG="$(mktemp)"
+    trap "rm -rf '$SANDBOX' '$PATCH_LOG'" 0
+
+    UTIL_PATH="$SANDBOX" "$SETUP" > /dev/null
+
+    SANDBOX_STATE="$SANDBOX/$STATE_NAME"
+    if [ ! -d "$SANDBOX_STATE" ]; then
+        echo "error: failed to setup $NAME" >&2
+        exit 1
+    fi
+
+    cd "$SANDBOX_STATE"
+
+    find . -type d | while read -r d; do
+        target="$TARGET_STATE/$d"
+        if [ ! -d "$target" ]; then
+            mkdir -p "$target"
+            echo "created directory: $target" >> "$PATCH_LOG"
+        fi
+    done
+
+    find . -type f | while read -r f; do
+        target="$TARGET_STATE/$f"
+        if [ ! -f "$target" ]; then
+            cp "$f" "$target"
+            echo "copied file: $target" >> "$PATCH_LOG"
+        fi
+    done
+
+    if [ -s "$PATCH_LOG" ]; then
+        echo "toolkit $NAME updated"
+        cat "$PATCH_LOG"
+    else
+        echo "toolkit $NAME is up to date"
+    fi
+}
+
+case "$1" in
+    '')
+        echo "usage: toolkit-setup <name>"
+        echo "       toolkit-setup --all"
+        exit 1
+        ;;
+    --all)
+        rc=0
+        for directory in "$TOOLKIT_BIN_PATH"/*.bin; do
+            if [ ! -d "$directory" ] || [ ! -f "$directory/setup" ]; then
+                continue
+            fi
+
+            name=$(basename "$directory" .bin)
+            setup_one "$name" || rc=1
+        done
+        exit "$rc"
+        ;;
+    *)
+        setup_one "$1"
+        ;;
+esac

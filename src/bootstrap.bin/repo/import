@@ -1,0 +1,45 @@
+#!/bin/sh
+##<help>
+## import - Register and select an existing repository and discover its service ports.
+## Usage: bootstrap repo import <path>
+## Accept absolute or relative paths, including . and ..; store and print the absolute path.
+## Require a services directory; use the canonical directory basename as the name.
+## Preserve repository files and reuse existing port domains and reservations.
+## Read env-dir/env-dev PORT files using ENV_USER (or USER), then default.
+## Create a 100-port domain if missing. Services without PORT files need no reservation.
+## Reject conflicting registrations or ports. Print the imported repository path.
+## Completed port reservations remain available for retry if registration fails.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+if [ "$#" -ne 1 ]; then
+    bootstrap_error 'usage: bootstrap repo import <path>'
+fi
+if [ ! -d "$1" ]; then
+    bootstrap_error "repo directory does not exist: $1"
+fi
+path=$(CDPATH= cd -- "$1" && pwd -P)
+if [ "$path" != "$(printf '%s' "$path" | tr '\t\n' '  ')" ]; then
+    bootstrap_error 'repo paths cannot contain tabs or newlines'
+fi
+name=${path##*/}
+bootstrap_name "$name"
+if [ ! -d "$path/services" ] || [ -L "$path/services" ]; then
+    bootstrap_error 'repo pattern requires a services directory (not a symlink)'
+fi
+# Check registry conflicts before changing any port state.
+if [ -e "$STATE_DIR/repos/$name" ]; then
+    if [ "$(cat "$STATE_DIR/repos/$name/path")" != "$path" ]; then
+        bootstrap_error "repo name already registered: $name"
+    fi
+fi
+for existing in "$STATE_DIR"/repos/*/path; do
+    [ -f "$existing" ] || continue
+    if [ "$(cat "$existing")" = "$path" ] && [ "$existing" != "$STATE_DIR/repos/$name/path" ]; then
+        bootstrap_error "path already registered: $path"
+    fi
+done
+command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+# Domain creation and discovery share the port lock; our parent holds bootstrap's.
+(cd -- "$path" && port allocate discover --create-domain) >&2
+bootstrap_register "$name" "$path"

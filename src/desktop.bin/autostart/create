@@ -1,0 +1,19 @@
+#!/bin/sh
+##<help>
+## autostart create - Enable configured workspaces at desktop login.
+## Usage: desktop autostart create
+## Saves the current UTIL_PATH and installed launcher path in the startup entry.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/files.sh"
+[ "$#" -eq 0 ] || exit 1
+launcher=$(cd "$(dirname "$0")/../.." && pwd)/desktop
+# Escape a Desktop Entry quoted argument, not a shell argument.
+launcher=$(printf '%s' "$launcher" | sed 's/[\\"`$]/\\&/g; s/%/%%/g')
+state=$(printf '%s' "$UTIL_PATH" | sed 's/[\\"`$]/\\&/g; s/%/%%/g')
+config="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+mkdir -p "$config"
+atomic_write "$config/desktop-bootstrap.desktop" printf '%s\n' \
+    '[Desktop Entry]' 'Type=Application' 'Name=Development Workspaces' \
+    "Exec=env \"UTIL_PATH=$state\" \"$launcher\" start --login" \
+    'Terminal=false' 'X-GNOME-Autostart-enabled=true' 'X-GNOME-Autostart-Delay=10'

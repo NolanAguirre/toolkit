@@ -1,0 +1,97 @@
+#!/bin/sh
+##<help>
+## allocate default - Allocate service ports and fill missing development PORT files.
+## Usage: port allocate default [--strict-nginx]
+## Use the current directory name as an existing domain; scan env-dir and env-dev.
+## Write ENV_USER/PORT (or USER/PORT); preserve existing user or fallback default/PORT.
+## Existing files, including empty ones, are never overwritten. Skip dependency trees.
+## Register existing PORT values first; use stable service paths for new allocations.
+## For nginx, prefer the block's hundred plus ten times its thousands digit:
+## 6060, 6160, ..., 7070, 7170, ..., 8080. Use a free block port if unavailable.
+## --strict-nginx requires that preferred port for new nginx assignments; fail instead of falling back.
+## When filling a missing PORT, existing nginx reservations must match in strict mode; never relocate them.
+## Print each newly written port. Retain completed allocations if a later write fails.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+strict_nginx=0
+case "$#:${1:-}" in
+    0:)
+        ;;
+    1:--strict-nginx)
+        strict_nginx=1
+        ;;
+    *)
+        port_error 'usage: port allocate default [--strict-nginx]'
+        ;;
+esac
+root=$(pwd -P)
+domain=${root##*/}
+port_require_domain "$domain"
+env_user=${ENV_USER:-${USER:-default}}
+if [ "$env_user" = . ] || [ "$env_user" = .. ] || printf '%s\n' "$env_user" | grep -q /; then
+    port_error 'ENV_USER or USER must be a directory name'
+fi
+scan=$(mktemp "$STATE_DIR/.default.XXXXXX")
+trap 'rm -f -- "$scan"' 0
+trap 'exit 1' HUP INT TERM
+find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv \) -prune -o \
+    -type d \( -name env-dir -o -name env-dev \) -prune -exec sh -c '
+        set -e
+        env_user=$1
+        shift
+        for directory in "$@"; do
+            file="$directory/$env_user/PORT"
+            [ ! -e "$file" ] && [ ! -L "$file" ] || continue
+            fallback="$directory/default/PORT"
+            [ ! -e "$fallback" ] && [ ! -L "$fallback" ] || continue
+            service=${directory%/*}
+            service=${service#./}
+            jq -cn --arg file "$file" --arg service "$service" \
+                "{file:\$file, service:\$service}"
+        done
+    ' sh "$env_user" {} + > "$scan"
+# Reserve nginx first so ordinary services do not consume its preferred port.
+atomic_write "$scan" jq -cs 'sort_by((if (.service | split("/") | last) == "nginx" then 0 else 1 end), .service)[]' "$scan"
+# Import configured ports before assigning new ones, under our existing lock.
+sh "$(dirname "$0")/discover" >/dev/null
+start=$(jq -r '.start' "$PORT_ROOT/$domain/.domain.json")
+end=$(jq -r '.end' "$PORT_ROOT/$domain/.domain.json")
+preferred=$((start / 100 * 100 + start / 1000 % 10 * 10))
+while IFS= read -r entry; do
+    file=$(printf '%s\n' "$entry" | jq -r '.file')
+    service=$(printf '%s\n' "$entry" | jq -r '.service')
+    name=$service
+    message=$domain
+    [ "$service" = . ] || message="$domain/$service"
+    # Reuse reservations discovered earlier, including the legacy nginx message.
+    record=$(jq -sc --arg domain "$domain" --arg name "$name" --arg message "$message" '
+        [.[] | select(.domain == $domain and
+            (.name == $name or .message == $message or
+             (($name | split("/") | last) == "nginx" and .message == "nginx")))]
+        | if length > 1 then error("multiple reservations match " + $message)
+          elif length == 1 then .[0] else empty end
+    ' "$PORT_INDEX")
+    if [ -n "$record" ]; then
+        port=$(printf '%s\n' "$record" | jq -r '.port')
+        if [ "$strict_nginx" = 1 ] && [ "${service##*/}" = nginx ] && [ "$port" -ne "$preferred" ]; then
+            port_error "nginx is already assigned $port, not preferred port $preferred; reconcile its allocation explicitly"
+        fi
+    elif [ "${service##*/}" = nginx ] && [ "$preferred" -ge "$start" ] && \
+            [ "$preferred" -le "$end" ] && [ -z "$(port_record "$preferred")" ]; then
+        record=$(jq -cn --arg domain "$domain" --arg name "$name" \
+            --argjson port "$preferred" --arg message "$message" \
+            --arg created "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            '{port:$port, domain:$domain, name:$name, message:$message, automatic:true, created_at:$created}')
+        port=$(port_save "$record" 1 0 '')
+    else
+        if [ "$strict_nginx" = 1 ] && [ "${service##*/}" = nginx ]; then
+            port_error "preferred nginx port $preferred is unavailable in domain $domain; no fallback assigned"
+        fi
+        port=$(sh "$(dirname "$0")/pull" "$domain" -n "$name" -m "$message")
+    fi
+    mkdir -p -- "${file%/*}"
+    # Noclobber also protects a file created by another process during the scan.
+    (set -C; printf '%s\n' "$port" > "$file") || port_error "cannot create $file; reservation retained"
+    printf '%s\n' "$port"
+done < "$scan"

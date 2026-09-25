@@ -1,0 +1,17 @@
+#!/bin/sh
+##<help>
+## command mv - Rename a command to change its order, or move it to another workspace.
+## Usage: desktop command mv <workspace> <name> <target-workspace> <new-name>
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+[ "$#" -eq 4 ] || desktop_error 'usage: desktop command mv <workspace> <name> <target-workspace> <new-name>'
+desktop_workspace "$1"
+desktop_name "$2"
+source="$WORKSPACE_DIR/commands/$2"
+[ -d "$source" ] || desktop_error "unknown command: $2"
+desktop_workspace "$3"
+desktop_name "$4"
+target="$WORKSPACE_DIR/commands/$4"
+[ ! -e "$target" ] || desktop_error "command already exists: $4"
+mv -T -- "$source" "$target"

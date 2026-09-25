@@ -1,0 +1,29 @@
+#!/bin/sh
+
+##<help>
+## build - Copy source tools into the configured bin directory.
+## Usage: toolkit build
+## Copy tools and shared helpers from the configured source to the bin directory.
+## Replace installed copies and make scripts executable; preserve toolkit state.
+## Files removed from source remain installed until toolkit prune is run.
+##</help>
+
+set -e
+
+mkdir -p "$TOOLKIT_BIN_PATH"
+
+for source in "$TOOLKIT_SRC_PATH"/*; do
+    name=$(basename "$source")
+
+    if [ -d "$source" ]; then
+        cp -r "$source" "$TOOLKIT_BIN_PATH/"
+        find "$TOOLKIT_BIN_PATH/$name" -type f -exec chmod +x {} +
+    elif [ -L "$source" ]; then
+        cp -P "$source" "$TOOLKIT_BIN_PATH/"
+    elif [ -f "$source" ]; then
+        cp -r "$source" "$TOOLKIT_BIN_PATH/"
+        chmod a+x "$TOOLKIT_BIN_PATH/$name"
+    fi
+done
+
+echo "toolkit built"

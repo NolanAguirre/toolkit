@@ -1,0 +1,20 @@
+#!/bin/sh
+##<help>
+## decrypt - Decrypt one encoded encrypt record from standard input.
+## Usage: encrypt decrypt < encrypted-record
+## Accept one ecrypt-v1: record and write its original plaintext to stdout.
+## age prompts for a password when the stored private key is password-protected.
+##</help>
+set -e
+if [ "$#" -ne 0 ]; then
+    echo "usage: encrypt decrypt < encrypted-record" >&2
+    exit 1
+fi
+record=$(cat)
+if ! printf '%s' "$record" | grep -zq '^ecrypt-v1:'; then
+    echo "error: unsupported encrypt record" >&2
+    exit 1
+fi
+record=${record#ecrypt-v1:}
+ciphertext=$(printf '%s' "$record" | base64 -d)
+printf '%s\n' "$ciphertext" | age --decrypt -i "$STATE_DIR/identity"

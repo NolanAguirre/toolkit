@@ -1,0 +1,22 @@
+#!/bin/sh
+##<help>
+## command create - Add a terminal tab, application window, or background command.
+## Usage: desktop command create <workspace> <name> <kind> <shell-command>
+## Kinds: tab, cursor, brave, background, window:<application-class>.
+## Commands run in the workspace directory; names sort alphabetically (use 10-, 20-).
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+[ "$#" -eq 4 ] || desktop_error 'usage: desktop command create <workspace> <name> <kind> <shell-command>'
+desktop_workspace "$1"
+desktop_name "$2"
+desktop_kind "$3"
+[ -n "$4" ] || desktop_error 'command must not be empty'
+sh -n -c "$4"
+target="$WORKSPACE_DIR/commands/$2"
+[ ! -e "$target" ] || desktop_error "command already exists: $2"
+staging=$(mktemp -d "$STATE_DIR/.command.XXXXXX")
+trap 'rm -rf -- "$staging"' 0
+printf '%s\n' "$3" > "$staging/kind"
+printf '%s\n' "$4" > "$staging/run"
+mv -T -- "$staging" "$target"

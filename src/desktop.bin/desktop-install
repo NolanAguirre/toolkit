@@ -1,0 +1,31 @@
+#!/bin/sh
+##<help>
+## install - Install and enable the GNOME 46 workspace placement extension.
+## Usage: desktop install
+## Log out and back in after installing or updating the extension.
+##</help>
+set -e
+[ "$#" -eq 0 ] || exit 1
+uuid=desktop-bootstrap@nolan.local
+target="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$uuid"
+mkdir -p "$target"
+cp "$(dirname "$0")/template/extension/extension.js" "$target/extension.js"
+cp "$(dirname "$0")/template/extension/metadata.json" "$target/metadata.json"
+enabled=$(gsettings get org.gnome.shell enabled-extensions)
+case "$enabled" in
+    *"'$uuid'"*)
+        ;;
+    *)
+        case "$enabled" in
+            *'[]')
+                enabled="['$uuid']"
+                ;;
+            *)
+                enabled=$(printf '%s\n' "$enabled" | sed "s/]$/, '$uuid']/")
+                ;;
+        esac
+        gsettings set org.gnome.shell enabled-extensions "$enabled"
+        ;;
+esac
+gnome-extensions enable "$uuid" 2>/dev/null || true
+printf 'Workspace helper installed. Log out and back in to load it.\n'

@@ -1,0 +1,47 @@
+#!/bin/sh
+##<help>
+## allocate mv - Rename a service allocation while keeping its port.
+## Usage: port allocate mv <domain> <old-name> <new-name>
+## Keep the port and custom descriptions; update generated domain/service descriptions.
+## Accept discovered services too. Reject conflicts. Print the port; do not move files.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+if [ "$#" -ne 3 ]; then
+    port_error 'usage: port allocate mv <domain> <old-name> <new-name>'
+fi
+domain=$1
+old_name=$2
+new_name=$3
+port_require_domain "$domain"
+jq -ne --arg old "$old_name" --arg new "$new_name" '
+    [$old, $new] | all(.[]; test("[^[:space:]]") and (explode | all(. >= 32 and . != 127)))
+' >/dev/null || port_error 'names must be nonempty and contain no control characters'
+# Read current descriptions too, since discovery may have updated the metadata.
+records=$(jq -c --arg domain "$domain" 'select(.domain == $domain)' "$PORT_INDEX")
+records=$(
+    while IFS= read -r record; do
+        [ -n "$record" ] || continue
+        port_metadata "$record"
+    done <<RECORDS
+$records
+RECORDS
+)
+record=$(printf '%s\n' "$records" | jq -sc --arg domain "$domain" --arg old "$old_name" --arg new "$new_name" '
+    def description($name): if $name == "." then $domain else $domain + "/" + $name end;
+    def matches($name): .name == $name or (.name == null and .message == description($name));
+    . as $records | map(select(matches($old)))
+    | if length != 1 then error("source allocation missing or ambiguous") else .[0] end
+    | . as $source
+    | if any($records[]; .port != $source.port and matches($new))
+      then error("destination allocation already exists") else . end
+    | .name = $new
+    | if .message == description($old) then .message = description($new) else . end
+') || exit 1
+port=$(printf '%s\n' "$record" | jq -r '.port')
+# Commit identity first. Readers ignore stale metadata if publication is interrupted.
+atomic_write "$PORT_INDEX" jq -Rr --argjson record "$record" \
+    'if (fromjson | .port) == $record.port then ($record | tojson) else . end' "$PORT_INDEX"
+atomic_write "$PORT_ROOT/$domain/$port" printf '%s\n' "$record" ||
+    port_error "allocation renamed to $new_name, but metadata write failed; rerun mv with $new_name as both names to repair"
+printf '%s\n' "$port"

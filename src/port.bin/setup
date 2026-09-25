@@ -1,0 +1,16 @@
+#!/bin/sh
+##<help>
+## setup - Initialize the port allocation journal and history.
+## Usage: toolkit setup port
+## Store state under UTIL_PATH/ports; preserve existing domains and reservations.
+##</help>
+set -e
+. "$(dirname "$0")/../lib/locking.sh"
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+umask 077
+STATE_DIR="$UTIL_PATH/ports"
+mkdir -p "$STATE_DIR"
+file_lock "$STATE_DIR/lock"
+mkdir -p "$STATE_DIR/history" "$STATE_DIR/allocate"
+: >> "$STATE_DIR/allocate/ports"
+echo "port initialized"

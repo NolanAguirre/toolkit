@@ -1,0 +1,8 @@
+#!/bin/sh
+##<help>
+## autostart rm - Disable automatic desktop startup.
+## Usage: desktop autostart rm
+##</help>
+set -e
+[ "$#" -eq 0 ] || exit 1
+rm -f -- "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/desktop-bootstrap.desktop"

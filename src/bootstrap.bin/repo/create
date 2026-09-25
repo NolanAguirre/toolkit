@@ -1,0 +1,110 @@
+#!/bin/sh
+##<help>
+## create - Create ./<name>, link shared rules and skills, reserve 100 ports and select it.
+## Usage: bootstrap repo create <name> [--support=nginx]
+## Requires initialized port toolkit and shared rules in ~/.s6craft.
+## Link each skill directory containing SKILL.md from ~/.s6craft/.cursor/skills.
+## Link ~/.s6craft/.cursorignore to the repository .cursorignore.
+## Link ~/.s6craft/.cursorrules to the repository .cursorrules.
+## Existing paths or registrations are never overwritten. Prints the repo path.
+## Create db, infrastructure, scripts, services/nginx, ui and Cursor rules/skills/plan directories.
+## nginx: scaffold the UI/API reverse proxy and reserve services/nginx through the allocator.
+## --support accepts =nginx or a separate nginx value. Without it, retain the empty nginx directory.
+## Write its conventional block port to env-dir/default/PORT and the selected user's PORT.
+## Write HOST=localhost alongside PORT. ENV_USER selects the user, falling back to USER.
+## The default nginx identity is the repository UI/API proxy; extra routing proxies are separate services.
+## Use the repo name as its port domain and record it under UTIL_PATH/bootstrap/repos.
+## If scaffolding fails, partial code and reservations remain available for recovery.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+[ "$#" -ge 1 ] || bootstrap_error 'usage: bootstrap repo create <name> [--support=nginx]'
+name=$1
+shift
+bootstrap_name "$name"
+nginx=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --support)
+            [ "$#" -ge 2 ] || bootstrap_error 'missing value for --support'
+            support=$2
+            shift 2
+            ;;
+        --support=*)
+            support=${1#*=}
+            shift
+            ;;
+        *)
+            bootstrap_error "unknown option: $1"
+            ;;
+    esac
+    case "$support" in
+        nginx)
+            nginx=1
+            ;;
+        *)
+            bootstrap_error "unsupported --support value: $support"
+            ;;
+    esac
+done
+if [ -e "$STATE_DIR/repos/$name" ]; then
+    bootstrap_error "repo already registered: $name"
+fi
+parent=$(pwd -P)
+path="${parent%/}/$name"
+# Replacing tabs and newlines must leave the path unchanged.
+if [ "$path" != "$(printf '%s' "$path" | tr '\t\n' '  ')" ]; then
+    bootstrap_error 'repo paths cannot contain tabs or newlines'
+fi
+if [ -e "$path" ] || [ -L "$path" ]; then
+    bootstrap_error "path already exists: $path"
+fi
+rules_dir="$HOME/.s6craft"
+if [ ! -d "$rules_dir/.cursor/rules" ] || [ ! -f "$rules_dir/AGENTS.md" ] || [ ! -f "$rules_dir/.cursorignore" ]; then
+    bootstrap_error "missing shared rules in $rules_dir"
+fi
+cursor_rules="$rules_dir/.cursorrules"
+if [ ! -f "$cursor_rules" ]; then
+    bootstrap_error "missing Cursor rules: $cursor_rules"
+fi
+command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+env_user=${ENV_USER:-${USER:-default}}
+if [ "$nginx" = 1 ] && { [ "$env_user" = . ] || [ "$env_user" = .. ] || printf '%s\n' "$env_user" | grep -q /; }; then
+    bootstrap_error 'ENV_USER or USER must be a directory name'
+fi
+# The port child uses its own lock descriptor; the parent keeps ours held.
+# Reserve before scaffolding so allocation failures leave no repository behind.
+port allocate create "$name" -c 100 >&2
+mkdir -- "$path"
+mkdir -p "$path/.cursor/rules" "$path/.cursor/skills" "$path/.cursor/plans/old" "$path/.cursor/plans/todo" \
+    "$path/db" "$path/infrastructure" "$path/scripts" "$path/services/nginx" "$path/ui"
+# Create the allocator's discovery input before asking it to reserve nginx first.
+# Never duplicate its preferred-port arithmetic in bootstrap or write a guessed port.
+if [ "$nginx" = 1 ]; then
+    mkdir -p -- "$path/services/nginx/env-dir/default" "$path/services/nginx/routes"
+    (cd -- "$path" && ENV_USER=default port allocate default --strict-nginx) >&2
+    printf '%s\n' localhost > "$path/services/nginx/env-dir/default/HOST"
+    if [ "$env_user" != default ]; then
+        mkdir -p -- "$path/services/nginx/env-dir/$env_user"
+        cp -- "$path/services/nginx/env-dir/default/PORT" "$path/services/nginx/env-dir/$env_user/PORT"
+        cp -- "$path/services/nginx/env-dir/default/HOST" "$path/services/nginx/env-dir/$env_user/HOST"
+    fi
+    template="$(dirname "$0")/../template/nginx"
+    cp -- "$template/Makefile" "$path/services/nginx/Makefile"
+    cp -- "$template/start" "$path/services/nginx/start"
+    cp -- "$template/nginx.conf" "$path/services/nginx/nginx.conf"
+    cp -- "$template/gitignore" "$path/services/nginx/.gitignore"
+    cp -- "$template/root.mk" "$path/Makefile"
+fi
+for rule in "$rules_dir"/.cursor/rules/*.mdc; do
+    [ -f "$rule" ] || continue
+    ln -s -- "$rule" "$path/.cursor/rules/${rule##*/}"
+done
+ln -s -- "$rules_dir/AGENTS.md" "$path/AGENTS.md"
+ln -s -- "$rules_dir/.cursorignore" "$path/.cursorignore"
+ln -s -- "$cursor_rules" "$path/.cursorrules"
+for skill in "$rules_dir"/.cursor/skills/*; do
+    [ -d "$skill" ] && [ -f "$skill/SKILL.md" ] || continue
+    ln -s -- "$skill" "$path/.cursor/skills/${skill##*/}"
+done
+bootstrap_register "$name" "$path"

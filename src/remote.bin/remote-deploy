@@ -1,0 +1,41 @@
+#!/bin/sh
+##<help>
+## deploy - Upload prepared service artifacts to their generated bin/deploy commands.
+## Usage: remote deploy <repo> <release-directory>
+## Usage: remote deploy <repo> <service> <release-directory>
+## A repository bundle contains <service>/run and that service's packaged files.
+## A single-service directory contains run and its packaged files directly.
+## Each run must be executable and keep the service in the foreground.
+## Deploy as the service owner, atomically switch current, retain four releases and restart with s6.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+if [ "$#" -eq 3 ]; then
+    directory=$(CDPATH= cd -- "$3" && pwd -P)
+else
+    directory=$(CDPATH= cd -- "$2" && pwd -P)
+fi
+upload=$(mktemp -d "$REMOTE_STATE/.deploy.XXXXXX")
+trap 'rm -rf -- "$upload"' 0
+trap 'exit 1' HUP INT TERM
+# Package every artifact before SSH; malformed bundles never partly deploy.
+while IFS= read -r entry; do
+    service=${entry%:*}
+    source="$directory/$service"
+    if [ "$#" -eq 3 ]; then
+        source=$directory
+    fi
+    [ -d "$source" ] && [ ! -L "$source" ] || remote_error "missing service artifact directory: $source"
+    [ -f "$source/run" ] && [ -x "$source/run" ] || remote_error "service artifact needs executable run: $source/run"
+    special=$(find "$source" ! -type f ! -type d -print)
+    [ -z "$special" ] || remote_error 'release may contain only regular files and directories'
+    tar --format=ustar --mode='u+rwX,go+rX,go-w,a-s' -czf "$upload/$service.tar.gz" -C "$source" .
+done < "$REMOTE_MANIFEST"
+REMOTE_ARCHIVE="$upload/bundle.tar.gz"
+# Use the manifest rather than a wildcard that could include the bundle itself.
+set --
+while IFS= read -r entry; do
+    set -- "$@" "${entry%:*}.tar.gz"
+done < "$REMOTE_MANIFEST"
+tar -czf "$REMOTE_ARCHIVE" -C "$upload" "$@"
+remote_send deploy

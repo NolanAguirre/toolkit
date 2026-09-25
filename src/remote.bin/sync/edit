@@ -1,0 +1,12 @@
+#!/bin/sh
+##<help>
+## edit - Replace a directory-copy deployment profile.
+## Usage: remote sync edit <name> <ssh-alias> <remote-directory> [entry ...]
+## Omitted entries reset the selection to Assets Packages ProjectSettings.
+## Change local registration only; no connection or file transfer is made.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/files.sh"
+[ -f "$SYNC_PROFILE" ] || { echo 'error: sync profile missing; use remote sync create' >&2; exit 1; }
+shift
+atomic_write "$SYNC_PROFILE" printf '%s\n' "$@"

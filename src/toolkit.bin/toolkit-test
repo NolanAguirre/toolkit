@@ -1,0 +1,110 @@
+#!/bin/sh
+
+##<help>
+## test - Check a tool's command help in temporary state.
+## Usage: toolkit test <name> | --all
+## Examples: toolkit test bootstrap; toolkit test port; toolkit test --all
+## --all uses xargs to run up to four tool checks in parallel, each in its own state.
+## Build disposable commands from the configured source; no Python is required.
+## Isolate HOME, UTIL_PATH, installed commands and temp files under toolkit/tests.
+## Clean up the run directory on exit and return the tests' exit status.
+## Discover commands with toolkit ls and check --help for a Usage: line.
+## Check help only; state-changing behavior is not tested.
+## This isolates test filesystem state; it is not an OS security sandbox.
+##</help>
+
+set -e
+
+if [ "$#" -ne 1 ]; then
+    echo 'usage: toolkit test <name> | --all' >&2
+    exit 1
+fi
+
+suite=$1
+if [ "$suite" = --all ]; then
+    listing=$(TOOLKIT_BIN_PATH="$TOOLKIT_SRC_PATH" sh "$TOOLKIT_SRC_PATH/toolkit.bin/toolkit-ls")
+    names=$(printf '%s\n' "$listing" | awk '/^[^ ]/ { print }')
+
+    if [ -z "$names" ]; then
+        echo 'error: no tools found' >&2
+        exit 1
+    fi
+
+    printf '%s\n' "$names" | xargs -r -P 4 -n 1 sh "$0"
+    exit 0
+fi
+
+if ! printf '%s' "$suite" | grep -zq '^[A-Za-z0-9][A-Za-z0-9_-]*$'; then
+    echo "error: invalid test suite: $suite" >&2
+    exit 1
+fi
+
+# Keep the installed commands and all writable paths inside this test run.
+umask 077
+mkdir -p "$UTIL_PATH/toolkit/tests"
+run=$(mktemp -d "$UTIL_PATH/toolkit/tests/run.XXXXXX")
+run=$(cd "$run" && pwd -P)
+
+trap 'rm -rf -- "$run"' 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+mkdir -p "$run/home" "$run/state" "$run/bin" "$run/tmp" "$run/work"
+export HOME="$run/home"
+export UTIL_PATH="$run/state"
+export TOOLKIT_BIN_PATH="$run/bin"
+export STATE_DIR="$UTIL_PATH/toolkit"
+export TMPDIR="$run/tmp"
+export TOOLKIT_HIST_LOCK=1
+export PATH="$run/bin:$PATH"
+
+cd "$run/work"
+sh "$TOOLKIT_SRC_PATH/toolkit.bin/setup" >/dev/null
+sh "$TOOLKIT_SRC_PATH/toolkit.bin/toolkit-build" >/dev/null
+
+# Turn the indented command listing into complete command names.
+toolkit ls > "$run/commands"
+awk -v suite="$suite" '
+    /^[^ ]/ {
+        tool = $0
+        next
+    }
+    {
+        match($0, /[^ ]/)
+        depth = (RSTART - 1) / 2
+        item = substr($0, RSTART)
+
+        if (item ~ /\/$/) {
+            sub(/\/$/, "", item)
+            dirs[depth] = item
+            next
+        }
+        if (suite != "--all" && tool != suite) next
+
+        command = tool
+        for (i = 1; i < depth; i++) {
+            command = command " " dirs[i]
+        }
+        print command " " item
+    }
+' "$run/commands" > "$run/help-commands"
+
+if [ ! -s "$run/help-commands" ]; then
+    echo "error: no commands found for $suite" >&2
+    exit 1
+fi
+
+set -f
+while IFS= read -r command; do
+    # ls emits command words, not shell code; splitting never evaluates them.
+    set -- $command
+    "$@" --help > "$run/help-output"
+
+    if ! grep -q '^Usage: ' "$run/help-output"; then
+        echo "error: missing Usage: line in $command --help" >&2
+        exit 1
+    fi
+
+    printf 'help ok: %s\n' "$command" >&2
+done < "$run/help-commands"

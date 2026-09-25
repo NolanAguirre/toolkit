@@ -1,0 +1,55 @@
+#!/bin/sh
+##<help>
+## kill - Force-kill processes using the specified TCP or UDP ports.
+## Usage: port kill <port> [port ...]
+## Accept ports from 1 to 65535. Find processes using lsof, or fuser as a fallback.
+## Send SIGKILL once to each matching process; no matches is a successful no-op.
+## Port reservations remain unchanged.
+##</help>
+
+[ "$#" -gt 0 ] || { echo 'usage: port kill <port> [port ...]' >&2; exit 2; }
+
+# Validate every argument before looking up or killing any processes.
+ports=""
+for port in "$@"; do
+    if ! printf '%s' "$port" | grep -zq '^[0-9][0-9]*$'; then
+        echo "error: invalid port: $port" >&2
+        exit 2
+    fi
+    port=$(awk -v n="$port" 'BEGIN {
+        if (n+0 < 1 || n+0 > 65535) exit 1
+        printf "%.0f", n
+    }') || { echo 'error: ports must be between 1 and 65535' >&2; exit 2; }
+    ports="$ports $port"
+done
+
+if command -v lsof >/dev/null 2>&1; then
+    backend=lsof
+elif command -v fuser >/dev/null 2>&1; then
+    backend=fuser
+else
+    echo 'error: port kill requires lsof or fuser' >&2
+    exit 1
+fi
+
+# Gather first, then deduplicate: one process may use several requested ports.
+pids=$(
+    for port in $ports; do
+        if [ "$backend" = lsof ]; then
+            lsof -nP -t -iTCP:"$port" 2>/dev/null
+            lsof -nP -t -iUDP:"$port" 2>/dev/null
+        else
+            fuser "$port"/tcp 2>/dev/null
+            fuser "$port"/udp 2>/dev/null
+        fi
+    done | tr ' ' '\n' | sed '/^$/d' | sort -un
+)
+
+if [ -z "$pids" ]; then
+    echo "No processes found on ports:$ports"
+    exit 0
+fi
+
+printf 'Killing processes on ports:%s (PIDs: %s)\n' "$ports" "$(printf '%s\n' "$pids" | tr '\n' ' ')"
+# Intentional splitting of numeric PIDs; preserve the original script's SIGKILL.
+kill -9 $pids

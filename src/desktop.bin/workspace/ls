@@ -1,0 +1,12 @@
+#!/bin/sh
+##<help>
+## workspace ls - List workspace names, numbers, and working directories.
+## Usage: desktop workspace ls
+##</help>
+set -e
+[ "$#" -eq 0 ] || exit 1
+for config in "$STATE_DIR"/workspaces/*/config; do
+    [ -f "$config" ] || continue
+    name=$(basename "$(dirname "$config")")
+    printf '%s\t%s\t%s\n' "$name" "$(sed -n '1p' "$config")" "$(sed -n '2p' "$config")"
+done

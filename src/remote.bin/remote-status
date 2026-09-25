@@ -1,0 +1,10 @@
+#!/bin/sh
+##<help>
+## status - Report setup and s6 state for every current repository service.
+## Usage: remote status <repo>
+## Read the host; return nonzero for missing setup or failed supervision.
+## Down services without a current release are reported as awaiting-runtime.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+remote_send status

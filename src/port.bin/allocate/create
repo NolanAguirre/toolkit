@@ -1,0 +1,85 @@
+#!/bin/sh
+##<help>
+## allocate create - Create an automatic block; defaults to aligned 100-port blocks from 6000.
+## Usage: port allocate create <domain> [-s <start>] [-e <end> | -c <count>]
+## -s/--start and -e/--end specify an inclusive range; -c/--count specifies its size.
+## With only --start, reserve 100 ports beginning there.
+## Without a start, choose the first available hundred-aligned block from port 6000 upward.
+## Reject existing domains and overlaps with reserved blocks or individual ports.
+## This records reservations only; it does not check or bind network sockets.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+if [ "$#" -lt 1 ]; then
+    port_error 'usage: port allocate create <domain> [options]'
+fi
+domain=$1
+shift
+port_domain "$domain"
+if [ -e "$PORT_ROOT/$domain" ]; then
+    port_error "domain already exists: $domain"
+fi
+start=
+end=
+count=
+while [ "$#" -gt 0 ]; do
+    if [ "$#" -lt 2 ]; then
+        port_error "missing value for $1"
+    fi
+    case "$1" in
+        -s|--start)
+            start=$(port_number "$2")
+            ;;
+        -e|--end)
+            end=$(port_number "$2")
+            ;;
+        -c|--count)
+            count=$(port_number "$2")
+            ;;
+        *)
+            port_error "unknown option: $1"
+            ;;
+    esac
+    shift 2
+done
+# Gather occupied automatic blocks and reservations for first-fit selection.
+ranges=$(
+    for config in "$PORT_ROOT"/*/.domain.json; do
+        [ -f "$config" ] || continue
+        jq -r '[.start, .end] | @tsv' "$config" || exit 1
+    done
+    jq -r '[.port, .port] | @tsv' "$PORT_INDEX"
+)
+ranges=$(printf '%s\n' "$ranges" | sort -n)
+if [ -n "$end" ]; then
+    if [ -z "$start" ]; then
+        port_error '--end requires --start'
+    fi
+    if [ "$end" -lt "$start" ]; then
+        port_error '--end must be at least --start'
+    fi
+    if [ -n "$count" ] && [ "$count" -ne "$((end - start + 1))" ]; then
+        port_error '--count must equal the inclusive range size'
+    fi
+elif [ -n "$start" ]; then
+    count=${count:-100}
+    end=$((start + count - 1))
+else
+    count=${count:-100}
+    start=$(printf '%s\n' "$ranges" | awk -v count="$count" '
+        BEGIN { start=6000 }
+        NF == 2 { if ($2 < start) next; if (start+count-1 < $1) exit; start=int($2/100)*100+100 }
+        END { print start }')
+    end=$((start + count - 1))
+fi
+if [ "$end" -gt 65535 ]; then
+    port_error 'no block of that size is available within ports 1..65535'
+fi
+if printf '%s\n' "$ranges" | awk -v start="$start" -v end="$end" '
+    NF == 2 && $1 <= end && $2 >= start { found=1 } END { exit !found }'; then
+    port_error 'block overlaps an existing domain or allocated port'
+fi
+mkdir -m 700 "$PORT_ROOT/$domain"
+atomic_write "$PORT_ROOT/$domain/.domain.json" jq -n --arg domain "$domain" \
+    --argjson start "$start" --argjson end "$end" '{domain:$domain, start:$start, end:$end}'
+printf 'created domain %s: %s-%s (%s ports)\n' "$domain" "$start" "$end" "$((end - start + 1))"

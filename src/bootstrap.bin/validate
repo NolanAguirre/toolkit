@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+. "$(dirname "$0")/../lib/locking.sh"
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+export STATE_DIR="$UTIL_PATH/bootstrap"
+[ -f "$STATE_DIR/lock" ] && [ -d "$STATE_DIR/repos" ] && [ -f "$STATE_DIR/current_repo" ] || {
+    echo 'error: bootstrap is not initialized; run toolkit setup bootstrap' >&2
+    exit 1
+}
+umask 077
+file_lock "$STATE_DIR/lock"
+exec "$@"

@@ -1,0 +1,8 @@
+#!/bin/sh
+##<help>
+## ecrypt - Compatibility alias for the encrypt toolkit.
+## Usage: ecrypt <action> [args...]
+## Forward all arguments to encrypt; use ecrypt help to list encryption commands.
+##</help>
+# Compatibility name for the encrypt toolkit.
+exec "$(dirname "$0")/encrypt" "$@"

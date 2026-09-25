@@ -1,0 +1,57 @@
+#!/bin/sh
+##<help>
+## allocate pull - Return a stable named port, allocating the lowest free port on first use.
+## Usage: port allocate pull <domain> -n <name> [-m <message>]
+## The domain must exist. -n/--name identifies a port within that domain.
+## Reusing a name returns the same port; -m/--message updates its description.
+## Print only the port number. Fail when the domain's automatic block is exhausted.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/ports.sh"
+if [ "$#" -lt 1 ]; then
+    port_error 'usage: port allocate pull <domain> -n <name> [-m <message>]'
+fi
+domain=$1
+shift
+port_require_domain "$domain"
+name=
+message=
+message_set=0
+while [ "$#" -gt 0 ]; do
+    if [ "$#" -lt 2 ]; then
+        port_error "missing value for $1"
+    fi
+    case "$1" in
+        -n|--name)
+            name=$2
+            ;;
+        -m|--message)
+            message=$2
+            message_set=1
+            ;;
+        *)
+            port_error "unknown option: $1"
+            ;;
+    esac
+    shift 2
+done
+printf '%s' "$name" | jq -Rse 'test("[^[:space:]]") and (explode | all(. >= 32 and . != 127))' >/dev/null ||
+    port_error 'a nonempty name without control characters is required'
+record=$(jq -c --arg domain "$domain" --arg name "$name" \
+    'select(.domain == $domain and .name == $name)' "$PORT_INDEX")
+new=0
+if [ -z "$record" ]; then
+    start=$(jq -r '.start' "$PORT_ROOT/$domain/.domain.json")
+    end=$(jq -r '.end' "$PORT_ROOT/$domain/.domain.json")
+    used=$(jq -r '.port' "$PORT_INDEX")
+    port=$(printf '%s\n' "$used" | awk -v start="$start" -v end="$end" '
+        NF { used[$1]=1 } END { for (p=start; p<=end; p++) if (!(p in used)) { print p; exit } }')
+    if [ -z "$port" ]; then
+        port_error "domain $domain has no automatic ports left"
+    fi
+    record=$(jq -cn --arg domain "$domain" --arg name "$name" --argjson port "$port" \
+        --arg message "$message" --arg created "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+        '{port:$port, domain:$domain, name:$name, message:$message, automatic:true, created_at:$created}')
+    new=1
+fi
+port_save "$record" "$new" "$message_set" "$message"

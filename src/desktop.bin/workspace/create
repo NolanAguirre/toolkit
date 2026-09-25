@@ -1,0 +1,26 @@
+#!/bin/sh
+##<help>
+## workspace create - Register a named workspace and its working directory.
+## Usage: desktop workspace create <name> <number> <directory>
+## Multiple entries may share a desktop workspace number.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+[ "$#" -eq 3 ] || desktop_error 'usage: desktop workspace create <name> <number> <directory>'
+desktop_name "$1"
+desktop_number "$2"
+[ -d "$3" ] || desktop_error "directory does not exist: $3"
+repo=$(cd -- "$3" && pwd -P)
+case "$repo" in
+    *'
+'*)
+        desktop_error 'directory must not contain a newline'
+        ;;
+esac
+target="$STATE_DIR/workspaces/$1"
+[ ! -e "$target" ] || desktop_error "workspace already exists: $1"
+staging=$(mktemp -d "$STATE_DIR/.workspace.XXXXXX")
+trap 'rm -rf -- "$staging"' 0
+mkdir "$staging/commands"
+printf '%s\n%s\n' "$2" "$repo" > "$staging/config"
+mv -T -- "$staging" "$target"

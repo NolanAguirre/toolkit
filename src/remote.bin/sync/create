@@ -1,0 +1,13 @@
+#!/bin/sh
+##<help>
+## create - Register a directory-copy deployment profile, independent of bootstrap.
+## Usage: remote sync create <name> <ssh-alias> <remote-directory> [entry ...]
+## Default entries: Assets Packages ProjectSettings (Unity sources, including .meta files).
+## Custom entries replace defaults; each names a top-level file or directory, not a glob.
+## Use an existing remote directory with forward slashes, e.g. "C:/Projects/My Game".
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/files.sh"
+[ ! -e "$SYNC_PROFILE" ] || { echo 'error: sync profile exists; use remote sync edit' >&2; exit 1; }
+shift
+atomic_write "$SYNC_PROFILE" printf '%s\n' "$@"

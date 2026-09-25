@@ -1,0 +1,24 @@
+#!/bin/sh
+##<help>
+## directories - Create service directories after user setup.
+## Usage: remote setup directories <repo>
+## Preserve existing trees; reject conflicting ownership and permissions.
+##</help>
+for entry in "$@"; do
+    service_names "$entry"
+    require_users
+done
+make_directory /var/service-dir root 755
+make_directory /var/service root 755
+for entry in "$@"; do
+    service_names "$entry"
+    make_directory "$base" root 755
+    make_directory "$base/env" root 755
+    make_directory "$base/etc" root 755
+    make_directory "$base/bin" root 755
+    make_directory "$base/server" "$owner" 755
+    make_directory "$base/data" "$runtime" 700
+    make_directory "$base/log" root 755
+    make_directory "$base/log/main" "$logger" 755
+    printf '%s\tdirectories-ready\n' "$service"
+done

@@ -1,0 +1,7 @@
+{
+  "uuid": "desktop-bootstrap@nolan.local",
+  "name": "Desktop Bootstrap",
+  "description": "Place windows opened by the local desktop bootstrap script on their workspaces.",
+  "shell-version": ["46"],
+  "version": 2
+}

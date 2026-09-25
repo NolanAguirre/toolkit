@@ -1,0 +1,10 @@
+{
+  "name": "__NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "^20.19.0 || >=22.12.0" },
+  "scripts": { "start": "vite", "build": "vite build" },
+  "dependencies": { "react": "^19.2.0", "react-dom": "^19.2.0" },
+  "devDependencies": { "vite": "^7.3.1", "@vitejs/plugin-react": "^5.1.1" }
+}

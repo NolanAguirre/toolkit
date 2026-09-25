@@ -1,0 +1,145 @@
+#!/bin/sh
+set -e
+REMOTE_BIN=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
+. "$REMOTE_BIN/../lib/locking.sh"
+. "$REMOTE_BIN/../lib/remote.sh"
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+REMOTE_STATE="$UTIL_PATH/remote"
+[ -f "$REMOTE_STATE/lock" ] && [ -d "$REMOTE_STATE/targets" ] || remote_error 'run toolkit setup remote first'
+umask 077
+file_lock "$REMOTE_STATE/lock"
+command=$1
+shift
+action=${command##*/}
+case "$command" in
+    */sync/*)
+        . "$REMOTE_BIN/.sync-validate"
+        ;;
+esac
+case "$action" in
+    remote-ls)
+        [ "$#" -eq 0 ] || remote_error 'usage: remote ls'
+        export REMOTE_STATE
+        exec "$command" "$@"
+        ;;
+    remote-create|remote-edit)
+        [ "$#" -eq 2 ] || remote_error 'usage: remote create|edit <repo> <ssh-config-alias>'
+        remote_token "$2" || remote_error 'SSH target must be a config alias containing letters, digits, dots, underscores or hyphens'
+        ;;
+    remote-rm|remote-status)
+        [ "$#" -eq 1 ] || remote_error 'usage: remote rm|status <repo>'
+        ;;
+    remote-deploy)
+        case "$#" in
+            2) release_directory=$2 ;;
+            3) release_directory=$3 ;;
+            *) remote_error 'usage: remote deploy <repo> [service] <release-directory>' ;;
+        esac
+        [ -d "$release_directory" ] && [ ! -L "$release_directory" ] || remote_error 'release must be a real directory'
+        ;;
+    remote-setup)
+        [ "$#" -ge 2 ] || remote_error 'usage: remote setup <step> <repo> [service|--all]'
+        case "$1" in
+            service)
+                [ "$#" -eq 3 ] || remote_error 'usage: remote setup service <repo> <service|--all>'
+                ;;
+            users|directories|supervision|all)
+                [ "$#" -eq 2 ] || remote_error 'unexpected setup arguments'
+                ;;
+            *)
+                remote_error 'unknown setup step'
+                ;;
+        esac
+        ;;
+    *)
+        remote_error 'unknown remote command'
+        ;;
+esac
+if [ "$action" = remote-setup ]; then
+    REMOTE_REPO=$2
+else
+    REMOTE_REPO=$1
+fi
+remote_token "$REMOTE_REPO" || remote_error 'repo must be a registered bootstrap name'
+export REMOTE_BIN REMOTE_STATE REMOTE_REPO
+# Removing a target must also work after its repository has been unregistered.
+if [ "$action" = remote-rm ]; then
+    exec "$command" "$@"
+fi
+[ -f "$UTIL_PATH/bootstrap/lock" ] || remote_error 'run toolkit setup bootstrap first'
+exec 8>>"$UTIL_PATH/bootstrap/lock"
+flock -x 8
+registration="$UTIL_PATH/bootstrap/repos/$REMOTE_REPO/path"
+[ -f "$registration" ] || remote_error 'repo is not registered; use bootstrap repo load or import'
+root=$(cat "$registration")
+[ -d "$root/services" ] && [ ! -L "$root/services" ] || remote_error 'registered repo needs a real services directory'
+case "$action" in
+    remote-create|remote-edit)
+        exec "$command" "$@"
+        ;;
+esac
+[ -f "$REMOTE_STATE/targets/$REMOTE_REPO" ] || remote_error 'target missing; use remote create <repo> <ssh-config-alias>'
+REMOTE_TARGET=$(cat "$REMOTE_STATE/targets/$REMOTE_REPO")
+remote_token "$REMOTE_TARGET" || remote_error 'invalid registered SSH alias'
+command -v ssh >/dev/null 2>&1 || remote_error 'ssh is required'
+REMOTE_MANIFEST=$(mktemp "$REMOTE_STATE/.services.XXXXXX")
+trap 'rm -f -- "$REMOTE_MANIFEST"' 0
+trap 'exit 1' HUP INT TERM
+selected=--all
+if [ "$action" = remote-setup ] && [ "$1" = service ]; then
+    selected=$3
+    [ "$selected" = --all ] || remote_token "$selected" || remote_error 'invalid service name'
+fi
+if [ "$action" = remote-deploy ] && [ "$#" -eq 3 ]; then
+    selected=$2
+    remote_token "$selected" || remote_error 'invalid service name'
+fi
+env_user=${ENV_USER:-${USER:-default}}
+remote_token "$env_user" || remote_error 'ENV_USER must be a simple directory name'
+for directory in "$root"/services/*; do
+    [ -d "$directory" ] || continue
+    [ ! -L "$directory" ] || remote_error "service symlinks are not supported: $directory"
+    service=${directory##*/}
+    remote_token "$service" || remote_error "invalid service name: $service"
+    if [ "$selected" != --all ] && [ "$selected" != "$service" ]; then
+        continue
+    fi
+    unit="$REMOTE_REPO-$service"
+    case "$unit" in
+        [!a-z_]*|*[!a-z0-9_-]*)
+            remote_error 'remote repo and service names must form a lowercase Unix account name'
+            ;;
+    esac
+    [ "${#unit}" -le 27 ] || remote_error 'repo-service must be at most 27 characters (including the hyphen)'
+    port=-
+    for environment in "$directory"/env-*; do
+        case "${environment##*/}" in
+            env-dir|env-dev)
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        file="$environment/$env_user/PORT"
+        [ -e "$file" ] || file="$environment/default/PORT"
+        [ -e "$file" ] || continue
+        value=$(cat "$file")
+        [ -n "$value" ] || continue
+        [ "$port" = - ] || remote_error "multiple PORT sources for $service"
+        case "$value" in
+            *[!0-9]*|'')
+                remote_error "invalid PORT for $service"
+                ;;
+        esac
+        [ "${#value}" -le 5 ] && [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || remote_error "invalid PORT for $service"
+        port=$(printf '%s' "$value" | sed 's/^0*//')
+    done
+    printf '%s:%s\n' "$service" "$port" >> "$REMOTE_MANIFEST"
+done
+[ -s "$REMOTE_MANIFEST" ] || remote_error 'no matching services in repository'
+if ! awk -F: '$2 != "-" { if (seen[$2]++) exit 1 }' "$REMOTE_MANIFEST"; then
+    remote_error 'services have duplicate ports'
+fi
+export REMOTE_TARGET REMOTE_MANIFEST
+# Keep the locks and cleanup trap in this parent until SSH and all children exit.
+"$command" "$@"

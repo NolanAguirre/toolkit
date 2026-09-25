@@ -1,0 +1,57 @@
+#!/bin/sh
+
+##<help>
+## ls - List installed tools and their commands.
+## Usage: toolkit ls
+## Read the configured bin directory and print each tool's actions and nested commands.
+##</help>
+
+list_dir() (
+    directory="$1"
+    indent="$2"
+
+    for file in "$directory"/*; do
+        if [ ! -f "$file" ]; then
+            continue
+        fi
+        echo "${indent}$(basename "$file")"
+    done
+
+    for directory_entry in "$directory"/*/; do
+        if [ ! -d "$directory_entry" ]; then
+            continue
+        fi
+        name=$(basename "$directory_entry")
+        echo "${indent}${name}/"
+        list_dir "$directory_entry" "${indent}  "
+    done
+)
+
+for d in "$TOOLKIT_BIN_PATH"/*.bin; do
+    if [ ! -d "$d" ]; then
+        continue
+    fi
+    NAME=$(basename "$d" .bin)
+    echo "$NAME"
+
+    for f in "$d"/"$NAME"-*; do
+        if [ ! -f "$f" ]; then
+            continue
+        fi
+        ACTION=$(basename "$f")
+        ACTION=${ACTION#"$NAME-"}
+        echo "  $ACTION"
+    done
+
+    for sub in "$d"/*/; do
+        if [ ! -d "$sub" ]; then
+            continue
+        fi
+        subname=$(basename "$sub")
+        if [ "$subname" = template ]; then
+            continue
+        fi
+        echo "  ${subname}/"
+        list_dir "$sub" "    "
+    done
+done

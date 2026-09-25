@@ -1,0 +1,198 @@
+#!/bin/sh
+
+##<help>
+## help - Show command summaries or detailed help.
+## Usage: <tool> help [-v] [action ...]
+## Show summaries by default; -v prints complete help blocks.
+## Supply an action or nested command to narrow the output, such as port help allocate pull.
+## Commands also accept --help without executing the requested action.
+##</help>
+
+BIN_DIR="$(dirname "$0")"
+TOOLKIT="$(basename "$0")"
+TOOLKIT="${TOOLKIT%-help}"
+SEP="────────────────────────────────────────"
+
+VERBOSE=0
+if [ "${1:-}" = "-v" ]; then
+    VERBOSE=1
+    shift
+fi
+
+show_file_help() {
+    awk -v indent="$2" '
+        /^##<\/help>/ { in_help = 0 }
+        in_help {
+            line = $0
+            sub(/^## /, "", line)
+            sub(/^##$/, "", line)
+            print indent line
+        }
+        /^##<help>/ { in_help = 1 }
+    ' "$1"
+}
+
+show_dir_help() (
+    directory="$1"
+    indent="$2"
+    first=1
+
+    for file in "$directory"/*; do
+        if [ ! -f "$file" ]; then
+            continue
+        fi
+        if [ "$first" = 1 ]; then
+            first=0
+        else
+            echo "${indent}${SEP}"
+            echo ""
+        fi
+        show_file_help "$file" "$indent"
+    done
+
+    for directory_entry in "$directory"/*/; do
+        if [ ! -d "$directory_entry" ]; then
+            continue
+        fi
+        name=$(basename "$directory_entry")
+        if [ "$first" = 1 ]; then
+            first=0
+        else
+            echo "${indent}${SEP}"
+            echo ""
+        fi
+        echo "${indent}${name}:"
+        echo ""
+        show_dir_help "$directory_entry" "${indent}  "
+    done
+)
+
+summary_line() {
+    awk -v label="$2" '
+        /^##<\/help>/ { exit }
+        /^##<help>/ {
+            in_help = 1
+            line_count = 0
+            next
+        }
+        in_help {
+            sub(/^## /, "")
+            sub(/^##$/, "")
+            line_count++
+
+            if (line_count == 1) {
+                sub(/.* - /, "")
+                printf "  %-16s %s\n", label, $0
+            } else if (line_count == 2) {
+                printf "  %-16s %s\n", "", $0
+            }
+
+            if (line_count >= 3) exit
+        }
+    ' "$1"
+}
+
+summary_dir() (
+    directory="$1"
+    prefix="$2"
+
+    for file in "$directory"/*; do
+        if [ ! -f "$file" ]; then
+            continue
+        fi
+        summary_line "$file" "${prefix}$(basename "$file")"
+    done
+    for directory_entry in "$directory"/*/; do
+        if [ ! -d "$directory_entry" ]; then
+            continue
+        fi
+        summary_dir "$directory_entry" "${prefix}$(basename "$directory_entry") "
+    done
+)
+
+if [ $# -gt 0 ]; then
+    if [ -f "$BIN_DIR/$TOOLKIT-$1" ]; then
+        show_file_help "$BIN_DIR/$TOOLKIT-$1" ""
+        exit 0
+    fi
+
+    TARGET="$BIN_DIR"
+    while [ $# -gt 0 ]; do
+        if [ -d "$TARGET/$1" ]; then
+            TARGET="$TARGET/$1"
+            shift
+        elif [ -f "$TARGET/$1" ]; then
+            show_file_help "$TARGET/$1" ""
+            exit 0
+        else
+            echo "error: unknown action '$1'" >&2
+            exit 1
+        fi
+    done
+
+    if [ "$VERBOSE" = 1 ]; then
+        show_dir_help "$TARGET" ""
+    else
+        summary_dir "$TARGET" ""
+    fi
+    exit 0
+fi
+
+if [ "$VERBOSE" = 1 ]; then
+    first=1
+    for file in "$BIN_DIR/$TOOLKIT"-*; do
+        if [ ! -f "$file" ]; then
+            continue
+        fi
+        action=$(basename "$file")
+        action="${action#"$TOOLKIT"-}"
+        if [ "$action" = "help" ]; then
+            continue
+        fi
+        if [ "$first" = 1 ]; then
+            first=0
+        else
+            echo "$SEP"
+            echo ""
+        fi
+        show_file_help "$file" ""
+    done
+    for directory_entry in "$BIN_DIR"/*/; do
+        if [ ! -d "$directory_entry" ]; then
+            continue
+        fi
+        name=$(basename "$directory_entry")
+        if [ "$first" = 1 ]; then
+            first=0
+        else
+            echo "$SEP"
+            echo ""
+        fi
+        echo "${name}:"
+        echo ""
+        show_dir_help "$directory_entry" "  "
+    done
+    exit 0
+fi
+
+echo "Usage: $TOOLKIT <action> [args...]"
+echo ""
+
+for file in "$BIN_DIR/$TOOLKIT"-*; do
+    if [ ! -f "$file" ]; then
+        continue
+    fi
+    action=$(basename "$file")
+    action="${action#"$TOOLKIT"-}"
+    if [ "$action" = "help" ]; then
+        continue
+    fi
+    summary_line "$file" "$action"
+done
+
+for directory_entry in "$BIN_DIR"/*/; do
+    if [ ! -d "$directory_entry" ]; then
+        continue
+    fi
+    summary_dir "$directory_entry" "$(basename "$directory_entry") "
+done

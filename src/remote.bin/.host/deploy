@@ -1,0 +1,33 @@
+#!/bin/sh
+##<help>
+## deploy - Invoke each service's root-owned bin/deploy with its prepared tarball.
+## Usage: remote deploy <repo> [service] <release-directory>
+## Releases live at /var/service-dir/<repo>-<service>/server/server-<timestamp>-<random>.
+## Each service switches current independently; failed preparation leaves its current intact.
+##</help>
+command -v s6-setuidgid >/dev/null || fail 'install s6 first'
+command -v s6-svc >/dev/null || fail 'install s6 first'
+command -v s6-svok >/dev/null || fail 'install s6 first'
+for entry in "$@"; do
+    service_names "$entry"
+    require_users
+    require_layout
+    require_file_target "$base/bin/deploy"
+    require_file_target "$base/bin/deploy-prepare"
+    [ -x "$base/bin/deploy" ] || fail "run remote setup service for $service first"
+    s6-svok "$base" || fail "run remote setup supervision for $service first"
+done
+incoming=$(mktemp -d /tmp/toolkit-deploy.XXXXXX)
+chmod 700 "$incoming"
+trap 'rm -f "$archive"; rm -rf "$incoming"' 0
+trap 'exit 1' HUP INT TERM
+tar xzf "$archive" -C "$incoming"
+for entry in "$@"; do
+    service_names "$entry"
+    [ -f "$incoming/$service.tar.gz" ] && [ ! -L "$incoming/$service.tar.gz" ] || fail "missing artifact for $service"
+done
+for entry in "$@"; do
+    service_names "$entry"
+    "$base/bin/deploy" "$incoming/$service.tar.gz"
+    printf '%s\tdeployed\t%s\n' "$service" "$base/server/current"
+done

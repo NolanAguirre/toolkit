@@ -1,0 +1,11 @@
+#!/bin/sh
+##<help>
+## ls - List registered repository names and SSH aliases as tab-separated values.
+## Usage: remote ls
+## Read local target state without contacting hosts.
+##</help>
+set -e
+for target in "$REMOTE_STATE"/targets/*; do
+    [ -f "$target" ] || continue
+    printf '%s\t%s\n' "${target##*/}" "$(cat "$target")"
+done

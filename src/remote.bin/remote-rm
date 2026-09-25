@@ -1,0 +1,8 @@
+#!/bin/sh
+##<help>
+## rm - Remove a local SSH target registration.
+## Usage: remote rm <repo>
+## Leave the repository and remote host untouched.
+##</help>
+set -e
+rm -- "$REMOTE_STATE/targets/$REMOTE_REPO"

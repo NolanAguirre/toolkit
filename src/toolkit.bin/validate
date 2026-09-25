@@ -1,0 +1,31 @@
+#!/bin/sh
+
+if [ -z "$UTIL_PATH" ]; then
+    echo "error: UTIL_PATH is not set"
+    exit 1
+fi
+
+STATE_DIR="$UTIL_PATH/toolkit"
+
+if [ ! -d "$STATE_DIR" ]; then
+    echo "error: toolkit is not initialized, run toolkit setup first" >&2
+    exit 1
+fi
+
+if [ ! -f "$STATE_DIR/bin-path" ]; then
+    echo "error: bin-path not found, run toolkit setup first" >&2
+    exit 1
+fi
+
+if [ ! -f "$STATE_DIR/toolkit-path" ]; then
+    echo "error: toolkit-path not found, run toolkit setup first" >&2
+    exit 1
+fi
+
+TOOLKIT_BIN_PATH=$(cat "$STATE_DIR/bin-path")
+TOOLKIT_TOOLKIT_PATH=$(cat "$STATE_DIR/toolkit-path")
+TOOLKIT_SRC_PATH="$TOOLKIT_TOOLKIT_PATH"
+
+export STATE_DIR TOOLKIT_BIN_PATH TOOLKIT_TOOLKIT_PATH TOOLKIT_SRC_PATH
+
+exec "$@"

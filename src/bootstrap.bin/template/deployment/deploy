@@ -1,0 +1,14 @@
+#!/bin/sh
+##<help>
+## deploy - Run application-owned host steps with the deployment validator's lock held.
+## Usage: sudo make deployment.deploy
+##</help>
+set -e
+cd "$(dirname "$0")"
+./install
+./setup
+./stop
+./migrate
+./activate
+./start
+./status

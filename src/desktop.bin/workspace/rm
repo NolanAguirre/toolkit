@@ -1,0 +1,11 @@
+#!/bin/sh
+##<help>
+## workspace rm - Remove a workspace entry and its command configuration.
+## Usage: desktop workspace rm <name>
+## Does not delete the repository, stop services, or close windows.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+[ "$#" -eq 1 ] || desktop_error 'usage: desktop workspace rm <name>'
+desktop_workspace "$1"
+rm -r -- "$WORKSPACE_DIR"

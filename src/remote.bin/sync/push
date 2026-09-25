@@ -1,0 +1,19 @@
+#!/bin/sh
+##<help>
+## push - Copy selected local files and directories into the remote project.
+## Usage: remote sync push <name> <local-directory>
+## Overwrite matching files in place; preserve destination-only files. No build or restart.
+## Both project directories must exist. Requires OpenSSH SFTP and noninteractive SSH auth.
+## Transfers are not atomic; failures can leave partial copies. Avoid concurrent editors/clients.
+##</help>
+set -e
+batch=$(mktemp "$REMOTE_STATE/.sftp.XXXXXX")
+trap 'rm -f -- "$batch"' 0
+trap 'exit 1' HUP INT TERM
+printf 'cd "%s"\n' "$SYNC_DIRECTORY" > "$batch"
+for entry in "$@"; do
+    printf 'put -R "./%s" "."\n' "$entry" >> "$batch"
+done
+cd -- "$SYNC_LOCAL"
+sftp -b "$batch" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
+    "$SYNC_TARGET" >&2

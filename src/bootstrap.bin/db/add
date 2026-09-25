@@ -1,0 +1,151 @@
+#!/bin/sh
+##<help>
+## db add - Scaffold a Sqitch database beneath db/ in the current repository.
+## Usage: bootstrap db add <name> --support=postgres|sqlite
+## --support also accepts a separate value; select exactly one backend.
+## Names use lowercase letters, digits and underscores, beginning with a letter.
+## Create Sqitch config, local target, plan, deploy/revert/verify and Makefiles.
+## Start at v1.000.0; next is v1.001.0 with dependency [v1.000.0].
+## Deploy changes must be transactional and idempotent; revert/verify stay empty.
+## PostgreSQL uses postgres@localhost:5432; SQLite uses db/<name>/<name>.sqlite.
+## Register engine and database_url or repo-relative db_file beneath
+## UTIL_PATH/bootstrap/repos/<repo>/databases/<name>; never store passwords.
+## Registry values generate Sqitch config and new service environments; edits to outputs are not imported.
+## Add explicit db.<name>.<target> forwarding and help to the root Makefile.
+## Run from a registered repository root (bootstrap repo load .). No database tools needed.
+## Never allocate ports, connect to a database or run migrations while scaffolding.
+## Reject existing paths/forwarders/registrations. If root publishing fails, keep scaffold and registration.
+## Print the database directory on success.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+[ "$#" -gt 0 ] || bootstrap_error 'usage: bootstrap db add <name> --support=postgres|sqlite'
+name=$1
+shift
+if ! printf '%s' "$name" | grep -zq '^[a-z][a-z0-9_]*$' || [ "${#name}" -gt 63 ]; then
+    bootstrap_error 'database names must begin with a lowercase letter, contain only lowercase letters, digits or underscores, and be at most 63 characters'
+fi
+support=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --support)
+            [ "$#" -ge 2 ] || bootstrap_error 'missing value for --support'
+            value=$2
+            shift 2
+            ;;
+        --support=*)
+            value=${1#*=}
+            shift
+            ;;
+        *)
+            bootstrap_error "unknown option: $1"
+            ;;
+    esac
+    [ -z "$support" ] || bootstrap_error 'select exactly one --support backend'
+    case "$value" in
+        postgres|sqlite)
+            support=$value
+            ;;
+        *)
+            bootstrap_error "unsupported --support value: $value"
+            ;;
+    esac
+done
+[ -n "$support" ] || bootstrap_error '--support=postgres or --support=sqlite is required'
+root=$(pwd -P)
+repo=$(bootstrap_repo_entry "$root")
+if [ ! -d "$repo/databases" ]; then
+    bootstrap_error 'initialize database registry directories with bootstrap repo load . or toolkit setup bootstrap'
+fi
+entry="$repo/databases/$name"
+if [ -e "$entry" ] || [ -L "$entry" ]; then
+    bootstrap_error "database is already registered: $name"
+fi
+case "$support" in
+    postgres)
+        db_key=database_url
+        db_value="postgresql://postgres@localhost:5432/$name"
+        sqitch_uri="db:pg://${db_value#postgresql://}"
+        maintenance_url="${db_value%/*}/postgres"
+        ;;
+    sqlite)
+        db_key=db_file
+        db_value="db/$name/$name.sqlite"
+        sqitch_uri="db:sqlite:${db_value#db/$name/}"
+        ;;
+esac
+path="$root/db/$name"
+if [ -e "$path" ] || [ -L "$path" ]; then
+    bootstrap_error "path already exists: $path"
+fi
+if [ -L "$root/db" ]; then
+    bootstrap_error 'db must not be a symbolic link'
+fi
+if [ -e "$root/GNUmakefile" ] || [ -e "$root/makefile" ]; then
+    bootstrap_error 'use a root Makefile, not GNUmakefile or makefile, for forwarding'
+fi
+if [ -L "$root/Makefile" ] || { [ -e "$root/Makefile" ] && [ ! -f "$root/Makefile" ]; }; then
+    bootstrap_error 'root Makefile must be a regular file'
+fi
+mkdir -p -- "$root/db"
+pending=$(mktemp -d "$root/db/.db.XXXXXX")
+registration=
+trap 'rm -rf -- "$pending"; if [ -n "$registration" ]; then rm -rf -- "$registration"; fi' 0
+trap 'exit 1' HUP INT TERM
+registration=$(mktemp -d "$repo/databases/.db.XXXXXX")
+atomic_write "$registration/engine" printf '%s\n' "$support"
+atomic_write "$registration/$db_key" printf '%s\n' "$db_value"
+app="$pending/$name"
+template="$(dirname "$0")/../template/db"
+mkdir -p -- "$app/deploy" "$app/revert" "$app/verify"
+sed "s|__URI__|$sqitch_uri|g" "$template/$support/sqitch.conf" > "$app/sqitch.conf"
+sed -e "s/__NAME__/$name/g" -e "s|__MAINTENANCE_URL__|${maintenance_url:-}|g" "$template/$support/Makefile" > "$app/Makefile"
+cat "$template/targets.mk" >> "$app/Makefile"
+cp -- "$template/deploy.sql" "$app/deploy/v1.000.0.sql"
+: > "$app/revert/v1.000.0.sql"
+: > "$app/verify/v1.000.0.sql"
+stamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+sed -e "s/__NAME__/$name/g" -e "s/__STAMP__/$stamp/g" "$template/sqitch.plan" > "$app/sqitch.plan"
+if [ "$support" = sqlite ]; then
+    cp -- "$template/sqlite/gitignore" "$app/.gitignore"
+fi
+had_makefile=0
+if [ -f "$root/Makefile" ]; then
+    had_makefile=1
+    cp -- "$root/Makefile" "$pending/original.Makefile"
+    if grep -Fq "db.$name." "$pending/original.Makefile"; then
+        bootstrap_error "root Makefile already mentions db.$name forwarding"
+    fi
+    cp -- "$pending/original.Makefile" "$pending/Makefile"
+else
+    printf '.DEFAULT_GOAL := help\n.PHONY: help\nhelp:\n' > "$pending/Makefile"
+fi
+printf '\n' >> "$pending/Makefile"
+sed "s/__NAME__/$name/g" "$template/root.mk" >> "$pending/Makefile"
+# Publish without replacing a directory created during scaffolding.
+mv -T -n -- "$app" "$path"
+if [ -d "$app" ]; then
+    bootstrap_error "path appeared during scaffolding: $path"
+fi
+if ! mv -T -n -- "$registration" "$entry"; then
+    bootstrap_error "could not register database; scaffold retained at $path"
+fi
+if [ -d "$registration" ]; then
+    bootstrap_error "database registration appeared during scaffolding; scaffold retained at $path"
+fi
+registration=
+# validate holds the bootstrap lock across both publications. Detect outside edits.
+if [ "$had_makefile" = 1 ]; then
+    if [ -L "$root/Makefile" ] || ! cmp -s -- "$pending/original.Makefile" "$root/Makefile"; then
+        bootstrap_error "root Makefile changed; scaffold retained at $path; add its forwarders manually"
+    fi
+    if ! atomic_write "$root/Makefile" cat "$pending/Makefile"; then
+        bootstrap_error "could not publish root Makefile; scaffold retained at $path"
+    fi
+else
+    # A hard link publishes a new regular file without replacing an existing path.
+    if ! ln -- "$pending/Makefile" "$root/Makefile"; then
+        bootstrap_error "could not create root Makefile; scaffold retained at $path"
+    fi
+fi
+printf '%s\n' "$path"

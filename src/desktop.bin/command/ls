@@ -1,0 +1,14 @@
+#!/bin/sh
+##<help>
+## command ls - Show a workspace's command names, kinds, and shell scripts.
+## Usage: desktop command ls <workspace>
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+[ "$#" -eq 1 ] || desktop_error 'usage: desktop command ls <workspace>'
+desktop_workspace "$1"
+for command in "$WORKSPACE_DIR"/commands/*; do
+    [ -d "$command" ] || continue
+    printf '%s\t%s\n' "$(basename "$command")" "$(cat "$command/kind")"
+    cat "$command/run"
+done

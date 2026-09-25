@@ -1,0 +1,22 @@
+#!/bin/sh
+##<help>
+## rm - Unregister a repo, preserving its code and all port reservations.
+## Usage: bootstrap repo rm <name>
+## Removing the current repository clears the selection.
+## Accept a registered name, not a filesystem path. Missing names cause an error.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+if [ "$#" -ne 1 ]; then
+    bootstrap_error 'usage: bootstrap repo rm <name>'
+fi
+bootstrap_name "$1"
+entry="$STATE_DIR/repos/$1"
+if [ ! -d "$entry" ]; then
+    bootstrap_error "repo is not registered: $1"
+fi
+if [ "$(cat "$STATE_DIR/current_repo")" = "$1" ]; then
+    atomic_write "$STATE_DIR/current_repo" printf '%s' ''
+fi
+rm -- "$entry/path" "$entry/port_domain"
+rmdir -- "$entry"

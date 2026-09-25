@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+. "$(dirname "$0")/../lib/locking.sh"
+: "${UTIL_PATH:?UTIL_PATH is not set}"
+export STATE_DIR="$UTIL_PATH/ports"
+if [ ! -f "$STATE_DIR/lock" ] || [ ! -f "$STATE_DIR/allocate/ports" ]; then
+    echo "error: port is not initialized; run toolkit setup port" >&2
+    exit 1
+fi
+umask 077
+# The inherited descriptor holds the lock through exec. The kernel releases it
+# when the command exits, including on failure or termination; no stale lock.
+file_lock "$STATE_DIR/lock"
+command -v jq >/dev/null || { echo "error: port requires jq" >&2; exit 1; }
+# Refuse corrupt or duplicate reservations rather than risk allocating twice.
+jq -se '
+    all(.[];
+        (.port | type == "number") and (.port >= 1 and .port <= 65535) and
+        (.port == (.port | floor)) and
+        (.domain | test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and (.domain != "ports"))
+    and ((map(.port) | unique | length) == length)
+' "$STATE_DIR/allocate/ports" >/dev/null || {
+    echo "error: invalid or duplicate allocation in port index" >&2
+    exit 1
+}
+exec "$@"

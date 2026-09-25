@@ -1,0 +1,27 @@
+#!/bin/sh
+##<help>
+## password set - Protect the private key with a user-provided password.
+## Usage: encrypt password set
+## Prompt for and confirm the password through the terminal; never store the password.
+## Keep the same key and recipient, so existing encrypted records remain readable.
+## Fail if a password is already set; use encrypt password rotate to change it.
+##</help>
+set -e
+umask 077
+[ "$#" -eq 0 ] || { echo "usage: encrypt password set" >&2; exit 1; }
+mkdir "$STATE_DIR/key-operation" 2>/dev/null || {
+    echo "error: another key operation is active" >&2; exit 1;
+}
+temp=""
+trap 'rm -f "$temp"; rmdir "$STATE_DIR/key-operation"' 0
+trap 'exit 1' HUP INT TERM
+if head -n 1 "$STATE_DIR/identity" | grep -q '^-----BEGIN AGE ENCRYPTED FILE-----$'; then
+    echo "error: password already set; use encrypt password rotate" >&2
+    exit 1
+fi
+# age reads and confirms the password through /dev/tty, never argv or a file.
+encrypted=$(age --encrypt --passphrase --armor "$STATE_DIR/identity")
+temp=$(mktemp "$STATE_DIR/.encrypted.XXXXXX")
+printf '%s\n' "$encrypted" > "$temp"
+mv -f "$temp" "$STATE_DIR/identity"
+echo "password set"

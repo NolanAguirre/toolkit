@@ -1,0 +1,57 @@
+#!/bin/sh
+
+##<help>
+## prune - Remove installed files absent from source; -n previews removals.
+## Usage: toolkit prune [-n]
+## Compare the configured bin directory with source, including nested directories.
+## Without -n, delete installed entries with no matching source path.
+## Source files and state under UTIL_PATH are unchanged.
+##</help>
+
+set -e
+
+dry_run=false
+if [ "${1:-}" = "-n" ]; then
+    dry_run=true
+fi
+
+prune_dir() (
+    source="$1"
+    destination="$2"
+    prefix="$3"
+
+    for entry in "$destination"/*; do
+        if [ ! -e "$entry" ] && [ ! -L "$entry" ]; then
+            continue
+        fi
+
+        name="$(basename "$entry")"
+        relative_path="${prefix}${name}"
+
+        if [ ! -e "$source/$name" ] && [ ! -L "$source/$name" ]; then
+            if [ "$dry_run" = true ]; then
+                echo "would remove: $relative_path"
+            else
+                rm -rf "$entry"
+                echo "removed: $relative_path"
+            fi
+        elif [ -d "$entry" ] && [ ! -L "$entry" ] && [ -d "$source/$name" ] && [ ! -L "$source/$name" ]; then
+            prune_dir "$source/$name" "$entry" "$relative_path/"
+        fi
+    done
+)
+
+output=$(prune_dir "$TOOLKIT_SRC_PATH" "$TOOLKIT_BIN_PATH" "")
+
+if [ -z "$output" ]; then
+    echo "nothing to prune"
+else
+    echo "$output"
+    removed=$(echo "$output" | wc -l | tr -d ' ')
+
+    if [ "$dry_run" = true ]; then
+        echo "$removed item(s) would be removed"
+    else
+        echo "$removed item(s) removed"
+    fi
+fi

@@ -1,0 +1,13 @@
+#!/bin/sh
+##<help>
+## command rm - Remove one configured command.
+## Usage: desktop command rm <workspace> <name>
+## Does not stop an already running command.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/desktop.sh"
+[ "$#" -eq 2 ] || desktop_error 'usage: desktop command rm <workspace> <name>'
+desktop_workspace "$1"
+desktop_name "$2"
+[ -d "$WORKSPACE_DIR/commands/$2" ] || desktop_error "unknown command: $2"
+rm -r -- "$WORKSPACE_DIR/commands/$2"

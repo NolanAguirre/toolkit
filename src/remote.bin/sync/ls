@@ -1,0 +1,15 @@
+#!/bin/sh
+##<help>
+## ls - List directory-copy profiles without contacting their hosts.
+## Usage: remote sync ls
+## Print tab-separated name, SSH alias, remote directory and selected entries.
+##</help>
+set -e
+for profile in "$REMOTE_STATE"/sync/*; do
+    [ -f "$profile" ] || continue
+    printf '%s' "${profile##*/}"
+    while IFS= read -r value; do
+        printf '\t%s' "$value"
+    done < "$profile"
+    printf '\n'
+done

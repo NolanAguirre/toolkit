@@ -1,0 +1,35 @@
+#!/bin/sh
+##<help>
+## password rotate - Re-encrypt the private key using the old and new passwords.
+## Usage: encrypt password rotate
+## Prompt for the old password, then prompt for and confirm the new password.
+## Require an already protected key. Preserve the original key file on failure.
+## Keep the same recipient and existing records; passwords are never stored.
+##</help>
+set -e
+umask 077
+[ "$#" -eq 0 ] || { echo "usage: encrypt password rotate" >&2; exit 1; }
+mkdir "$STATE_DIR/key-operation" 2>/dev/null || {
+    echo "error: another key operation is active" >&2; exit 1;
+}
+temp=""
+trap 'rm -f "$temp"; rmdir "$STATE_DIR/key-operation"' 0
+trap 'exit 1' HUP INT TERM
+if ! head -n 1 "$STATE_DIR/identity" | grep -q '^-----BEGIN AGE ENCRYPTED FILE-----$'; then
+    echo "error: no password set; use encrypt password set" >&2
+    exit 1
+fi
+echo "Enter the old password when prompted." >&2
+# The decrypted key exists only in memory, and the old file survives failures.
+identity=$(age --decrypt "$STATE_DIR/identity")
+recipient=$(printf '%s\n' "$identity" | age-keygen -y)
+[ "$recipient" = "$(cat "$STATE_DIR/recipient")" ] || {
+    echo "error: private key does not match the history recipient" >&2; exit 1;
+}
+echo "Enter and confirm the new password when prompted." >&2
+encrypted=$(printf '%s\n' "$identity" | age --encrypt --passphrase --armor)
+unset identity
+temp=$(mktemp "$STATE_DIR/.encrypted.XXXXXX")
+printf '%s\n' "$encrypted" > "$temp"
+mv -f "$temp" "$STATE_DIR/identity"
+echo "password rotated"

@@ -1,0 +1,27 @@
+#!/bin/sh
+##<help>
+## setup - Prepare a registered repository on its SSH host.
+## Usage: remote setup users|directories|supervision|all <repo>
+## Usage: remote setup service <repo> <service|--all>
+## Individual steps require their prerequisites; all runs them in order.
+## Requires Linux or FreeBSD, root via sudo -n and s6 on the host.
+## Reuse an existing s6 scanner or start it with Linux systemd / FreeBSD rc.d.
+## Applications and logs are always supervised by s6; setup transfers no application code.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+
+step=$1
+shift
+case "$step" in
+    users|directories|service|supervision)
+        remote_send "$step"
+        ;;
+    all)
+        remote_send users directories service supervision
+        ;;
+    *)
+        echo 'error: expected users, directories, service, supervision or all' >&2
+        exit 1
+        ;;
+esac
