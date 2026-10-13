@@ -1,0 +1,63 @@
+#!/bin/sh
+##<help>
+## releases - Read s6 process identity and release records without changing service state.
+## Usage: remote releases <repo>
+## Output TSV: service, scope, key, value; no header. Unknown metadata is never inferred.
+##</help>
+command -v s6-svstat >/dev/null || fail 'install s6 first'
+for entry in "$@"; do
+    service_names "$entry"
+    snapshot=$(s6-svstat -o up,pid "$base" 2>/dev/null) || snapshot='unknown -'
+    read -r up pid <<STATE
+$snapshot
+STATE
+    case "$up" in
+        true)
+            state=up
+            ;;
+        false)
+            state=down
+            ;;
+        *)
+            state=unavailable
+            ;;
+    esac
+    printf '%s\truntime\tstate\t%s\n%s\truntime\tpid\t%s\n' "$service" "$state" "$service" "$pid"
+    selected=
+    if [ -L "$base/server/current" ]; then
+        selected=$(CDPATH= cd "$base/server/current" 2>/dev/null && pwd -P) || selected=
+    fi
+    case "$selected" in
+        "$base"/server/server-*)
+            selected=${selected##*/}
+            printf '%s\tselected\trelease\t%s\n' "$service" "$selected"
+            file="$base/releases/$selected"
+            if [ -f "$file" ] && (require_file_target "$file"); then
+                awk -F '\t' -v service="$service" '$1 != "release" && NF == 2 { printf "%s\tselected\t%s\t%s\n", service, $1, $2 }' "$file"
+            fi
+            ;;
+        *)
+            printf '%s\tselected\trelease\tunknown\n' "$service"
+            ;;
+    esac
+    identity=unknown
+    if [ "$state" = down ]; then
+        identity=not-running
+    fi
+    file="$base/running-release"
+    if [ "$state" = up ] && [ -f "$file" ] && (require_file_target "$file"); then
+        recorded_pid=$(release_value "$file" pid)
+        recorded_start=$(release_value "$file" process_start)
+        actual_start=$(process_identity "$pid")
+        # A restart during inspection or a stale record must not claim a running release.
+        if [ "$pid" = "$recorded_pid" ] && [ -n "$actual_start" ] && [ "$actual_start" = "$recorded_start" ]; then
+            record=$(cat "$file")
+            again=$(s6-svstat -o up,pid "$base" 2>/dev/null) || again=
+            if [ "$again" = "$snapshot" ]; then
+                identity=verified
+                printf '%s\n' "$record" | awk -F '\t' -v service="$service" 'NF == 2 { printf "%s\trunning\t%s\t%s\n", service, $1, $2 }'
+            fi
+        fi
+    fi
+    printf '%s\truntime\tidentity\t%s\n' "$service" "$identity"
+done

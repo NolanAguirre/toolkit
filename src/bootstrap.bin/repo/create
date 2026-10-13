@@ -3,6 +3,7 @@
 ## create - Create ./<name>, link shared rules and skills, reserve 100 ports and select it.
 ## Usage: bootstrap repo create <name> [--support=nginx]
 ## Requires initialized port toolkit and shared rules in ~/.s6craft.
+## Link every ~/.s6craft/.cursor/rules/*.mdc, including db-schema.mdc scoped to db/**.
 ## Link each skill directory containing SKILL.md from ~/.s6craft/.cursor/skills.
 ## Link ~/.s6craft/.cursorignore to the repository .cursorignore.
 ## Link ~/.s6craft/.cursorrules to the repository .cursorrules.

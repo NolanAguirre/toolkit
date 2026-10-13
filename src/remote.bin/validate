@@ -26,8 +26,8 @@ case "$action" in
         [ "$#" -eq 2 ] || remote_error 'usage: remote create|edit <repo> <ssh-config-alias>'
         remote_token "$2" || remote_error 'SSH target must be a config alias containing letters, digits, dots, underscores or hyphens'
         ;;
-    remote-rm|remote-status)
-        [ "$#" -eq 1 ] || remote_error 'usage: remote rm|status <repo>'
+    remote-rm|remote-status|remote-releases)
+        [ "$#" -eq 1 ] || remote_error 'usage: remote rm|status|releases <repo>'
         ;;
     remote-deploy)
         case "$#" in

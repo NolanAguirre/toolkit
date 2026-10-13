@@ -1,0 +1,11 @@
+#!/bin/sh
+##<help>
+## releases - Read selected and running release identities over SSH.
+## Usage: remote releases <repo>
+## Print TSV service, scope (runtime/selected/running), key and value.
+## Confirm running metadata against s6 PID and process start identity; unknown is explicit.
+## Never activate releases, restart services or trigger a supervisor scan.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+remote_send releases

@@ -158,55 +158,175 @@ atomic_to() (
     atomic_move "$temporary" "$destination" || exit 1
 )
 
-# Emit the root-owned, service-local deployment command, like the reference setup.
-service_deploy_script() {
-    printf '#!/bin/sh\nset -e\nservice_dir=%s\nservice_owner=%s\n' "$base" "$owner"
-    cat <<'DEPLOY'
-fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
-if [ "${1:-}" = -- ]; then
-    [ "$(id -un)" = "$service_owner" ] || fail 'release extraction must run as the service owner'
-    umask 022
-    server="$service_dir/server"
-    [ ! -e "$server/current" ] || [ -L "$server/current" ] || fail 'current must be a symlink'
-    release=$(mktemp -d "$server/server-$(date -u +%Y%m%d%H%M%S)-XXXXXX")
-    chmod 755 "$release"
-    tar xzf - -C "$release"
-    [ -x "$release/run" ] || fail "release needs an executable run: $release"
-    # Optional application preparation runs as the deployment owner before activation.
-    if [ -x "$service_dir/bin/deploy-prepare" ]; then
-        (cd "$release" && "$service_dir/bin/deploy-prepare")
-    fi
-    next=$(mktemp -d "$server/.current.XXXXXX")
-    trap 'rm -rf "$next"' 0
-    trap 'exit 1' HUP INT TERM
-    ln -s "${release##*/}" "$next/current"
-    case "$(uname -s)" in
-        Linux) mv -fT "$next/current" "$server/current" ;;
-        FreeBSD) mv -fh "$next/current" "$server/current" ;;
-    esac
-    # Keep four releases, always retaining the active release even after a clock change.
-    retained=1
-    ls -1dt "$server"/server-* | while IFS= read -r previous; do
-        [ "$previous" != "$release" ] || continue
-        [ -d "$previous" ] && [ ! -L "$previous" ] || continue
-        retained=$((retained + 1))
-        if [ "$retained" -gt 4 ]; then
-            rm -rf "$previous"
-        fi
-    done
-    printf '%s\n' "$release"
-    exit 0
+# Stable process identity, including its start time, prevents stale PID-only matches.
+process_identity() {
+    LC_ALL=C ps -o lstart= -p "$1" | sed 's/^[[:space:]]*//'
+}
+
+release_value() {
+    awk -F '\t' -v key="$2" '$1 == key { print $2 }' "$1"
+}
+
+service_run_script() {
+    printf '#!/bin/sh\n# toolkit-release-run-v1\nset -e\nservice_dir=%s\nruntime=%s\n' "$base" "$runtime"
+    cat <<'RUN'
+exec 2>&1
+. "$service_dir/bin/toolkit-host.sh"
+root_group=$(id -gn root)
+release=$(CDPATH= cd "$service_dir/server/current" && pwd -P)
+case "$release" in
+    "$service_dir"/server/server-*)
+        ;;
+    *)
+        fail 'current points outside the release directory'
+        ;;
+esac
+metadata="$service_dir/releases/${release##*/}"
+require_file_target "$metadata"
+require_file_target "$service_dir/running-release"
+identity=$(process_identity "$$")
+[ -n "$identity" ] || fail 'cannot read process start identity'
+# s6 is the sole writer of this record; it does not start a second run concurrently.
+# Use a pinned release path: activation may change current while this process starts.
+record=$(mktemp "$service_dir/.running.XXXXXX")
+trap 'rm -f "$record"' 0
+trap 'exit 1' HUP INT TERM
+if [ -f "$metadata" ]; then
+    cat "$metadata" > "$record"
+else
+    printf 'release\t%s\ncommit\tunknown\narchive_sha256\tunknown\n' "${release##*/}" > "$record"
 fi
-[ "$#" -eq 1 ] || fail "usage: $0 tarball"
+printf 'pid\t%s\nprocess_start\t%s\n' "$$" "$identity" >> "$record"
+atomic_to "$service_dir/running-release" "root:$root_group" 644 cat "$record"
+rm -f "$record"
+trap - 0 HUP INT TERM
+exec s6-envdir "$service_dir/env" s6-setuidgid "$runtime" "$release/run"
+RUN
+}
+
+# Emit the root-owned, service-local deployment command.
+service_deploy_script() {
+    printf '#!/bin/sh\n# toolkit-release-metadata-v1\nset -e\nservice_dir=%s\nservice_owner=%s\n' "$base" "$owner"
+    cat <<'DEPLOY'
+. "$service_dir/bin/toolkit-host.sh"
+case "${1:-}" in
+    --)
+        [ "$(id -un)" = "$service_owner" ] || fail 'release extraction must run as the service owner'
+        umask 022
+        release=$(mktemp -d "$service_dir/server/server-$(date -u +%Y%m%d%H%M%S)-XXXXXX")
+        chmod 755 "$release"
+        tar xzf - -C "$release"
+        [ -x "$release/run" ] || fail "release needs an executable run: $release"
+        if [ -x "$service_dir/bin/deploy-prepare" ]; then
+            (cd "$release" && "$service_dir/bin/deploy-prepare") >&2
+        fi
+        printf '%s\n' "$release"
+        exit 0
+        ;;
+    --activate)
+        [ "$(id -un)" = "$service_owner" ] || fail 'activation must run as the service owner'
+        release=$2
+        server="$service_dir/server"
+        case "$release" in
+            "$server"/server-*)
+                ;;
+            *)
+                fail 'invalid release path'
+                ;;
+        esac
+        [ ! -e "$server/current" ] || [ -L "$server/current" ] || fail 'current must be a symlink'
+        next=$(mktemp -d "$server/.current.XXXXXX")
+        trap 'rm -rf "$next"' 0
+        trap 'exit 1' HUP INT TERM
+        ln -s "${release##*/}" "$next/current"
+        atomic_move "$next/current" "$server/current"
+        # Retain four releases plus a still-running older release during slow restarts.
+        running=
+        if [ -f "$service_dir/running-release" ]; then
+            running=$(release_value "$service_dir/running-release" release)
+        fi
+        retained=1
+        ls -1dt "$server"/server-* | while IFS= read -r previous; do
+            [ "$previous" != "$release" ] || continue
+            [ "${previous##*/}" != "$running" ] || continue
+            [ -d "$previous" ] && [ ! -L "$previous" ] || continue
+            retained=$((retained + 1))
+            if [ "$retained" -gt 4 ]; then
+                rm -rf "$previous"
+            fi
+        done
+        exit 0
+        ;;
+esac
+[ "$#" -eq 1 ] || [ "$#" -eq 2 ] || fail "usage: $0 tarball [metadata]"
 [ "$(id -u)" -eq 0 ] || fail 'run the deployment command as root'
 if [ "${TOOLKIT_REMOTE_LOCKED:-}" != 1 ]; then
     [ ! -L /var/run/toolkit-remote.lock ] || fail 'host lock must not be a symlink'
     exec s6-setlock -d 9 /var/run/toolkit-remote.lock env TOOLKIT_REMOTE_LOCKED=1 "$0" "$@"
 fi
-[ -f "$1" ] || fail 'tarball must be a regular file'
+[ -f "$1" ] && [ ! -L "$1" ] || fail 'tarball must be a regular file'
 s6-svok "$service_dir" || fail 'service must be registered with s6 before deployment'
+case "$(uname -s)" in
+    Linux)
+        archive_hash=$(sha256sum "$1")
+        archive_hash=${archive_hash%% *}
+        ;;
+    FreeBSD)
+        archive_hash=$(sha256 -q "$1")
+        ;;
+esac
+commit=unknown
+commit_source=unknown
+dirty=unknown
+if [ "$#" -eq 2 ]; then
+    [ -f "$2" ] && [ ! -L "$2" ] || fail 'metadata must be a regular file'
+    [ "$(wc -l < "$2" | tr -d ' ')" = 4 ] || fail 'invalid release metadata'
+    commit=$(release_value "$2" commit)
+    commit_source=$(release_value "$2" commit_source)
+    dirty=$(release_value "$2" dirty)
+    expected_hash=$(release_value "$2" archive_sha256)
+    [ "$expected_hash" = "$archive_hash" ] || fail 'archive SHA-256 mismatch'
+    if [ "$commit" != unknown ]; then
+        case "$commit" in
+            ''|*[!0-9a-f]*)
+                fail 'invalid commit hash'
+                ;;
+        esac
+        [ "${#commit}" -eq 40 ] || [ "${#commit}" -eq 64 ] || fail 'invalid commit hash'
+    fi
+    case "$commit_source" in
+        artifact|checkout-at-deploy|unknown)
+            ;;
+        *)
+            fail 'invalid commit source'
+            ;;
+    esac
+    case "$dirty" in
+        true|false|unknown)
+            ;;
+        *)
+            fail 'invalid dirty flag'
+            ;;
+    esac
+fi
+root_group=$(id -gn root)
+require_directory "$service_dir/releases" root 755
+require_file_target "$service_dir/release"
 # The root shell opens the private upload before privileges are dropped.
-s6-setuidgid "$service_owner" "$0" -- < "$1"
+release=$(s6-setuidgid "$service_owner" "$0" -- < "$1")
+case "$release" in
+    "$service_dir"/server/server-*)
+        ;;
+    *)
+        fail 'invalid extracted release path'
+        ;;
+esac
+metadata="$service_dir/releases/${release##*/}"
+atomic_to "$metadata" "root:$root_group" 644 printf 'release\t%s\ncommit\t%s\ncommit_source\t%s\ndirty\t%s\narchive_sha256\t%s\ndeployed_at\t%s\n' \
+    "${release##*/}" "$commit" "$commit_source" "$dirty" "$archive_hash" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+s6-setuidgid "$service_owner" "$0" --activate "$release"
+atomic_to "$service_dir/release" "root:$root_group" 644 cat "$metadata"
 s6-svc -t "$service_dir"
+printf '%s\n' "$release"
 DEPLOY
 }

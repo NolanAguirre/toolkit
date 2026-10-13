@@ -4,12 +4,14 @@ The received shell script runs locally with /var and /run paths redirected into
 this temporary directory. No network access or actual user/ownership changes.
 """
 import concurrent.futures
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 
 src = Path(__file__).resolve().parents[1] / 'src'
 with tempfile.TemporaryDirectory(prefix='toolkit-remote-') as tmp:
@@ -130,19 +132,30 @@ elif cmd == 's6-svscanctl':
     assert a == ['-a', str(root/'var/service')]
     if not (root/'var/service/.s6-svscan/control').exists(): sys.exit(1)
 elif cmd == 's6-svstat':
-    path = pathlib.Path(a[0])
+    path = pathlib.Path(a[-1])
     if os.environ.get('FAIL_SUPERVISOR'): sys.exit(1)
+    if a[:2] == ['-o', 'up,pid']:
+        pid = os.environ.get('MOCK_SUPERVISED_PID')
+        if pid: print('true ' + pid)
+        else: print('false -1')
+        sys.exit(0)
     if path.name == 'log': print('up (pid 123) 10 seconds')
     elif (path/'down').exists() or not (path/'server/current/run').exists(): print('down 10 seconds, normally down')
     else: print('up (pid 124) 10 seconds')
-elif cmd in ('s6-envdir', 's6-log', 's6-svscan'):
+elif cmd == 's6-envdir':
+    os.execvp(a[1], a[1:])
+elif cmd == 'sha256':
+    import hashlib
+    assert a[0] == '-q'
+    print(hashlib.sha256(pathlib.Path(a[1]).read_bytes()).hexdigest())
+elif cmd in ('s6-log', 's6-svscan'):
     sys.exit(0)
 else: sys.exit(1)
 ''')
     utility.chmod(0o755)
     for name in ('uname', 'id', 'getent', 'useradd', 'pw', 'chown', 'stat', 'sync', 'mv', 'tar',
                  's6-setlock', 's6-svok', 's6-svc', 'sysrc', 'service', 'systemctl',
-                 's6-svscanctl', 's6-svstat', 's6-setuidgid', 's6-envdir', 's6-log', 's6-svscan'):
+                 's6-svscanctl', 's6-svstat', 's6-setuidgid', 's6-envdir', 's6-log', 's6-svscan', 'sha256'):
         (mocks/name).symlink_to('mock')
     local_sync = installed/'sync'
     local_sync.write_text('#!/bin/sh\n[ -z "${FAIL_LOCAL_SYNC:-}" ] || exit 1\nexec /usr/bin/sync "$@"\n')
@@ -169,7 +182,7 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
 
     def call(tool, *args, ok=True, extra=None):
         result = subprocess.run([str(installed/tool), *args], env=dict(env, **(extra or {})),
-                                text=True, capture_output=True, timeout=30)
+                                text=True, capture_output=True, timeout=60)
         assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
         return result.stdout.strip()
 
@@ -186,6 +199,11 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     (repo/'services/api/env-dir/default/PORT').write_text('8001\n')
     (repo/'services/dns').mkdir()
     (repo/'services/shared.js').write_text('// not a service\n')
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=env)
+    subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True, env=env)
+    subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                    'commit', '-qm', 'test fixture'], check=True, env=env)
+    checkout_commit = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
     call('bootstrap', 'repo', 'load', str(repo))
     remote('create', 'demo', 'test-pi')
     assert remote('ls') == 'demo\ttest-pi'
@@ -222,9 +240,19 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     assert not (base('api')/'server/current').exists()
     api = base('api')
     run = (api/'run').read_text()
-    assert f"exec s6-envdir ./env s6-setuidgid 'demo-api' ./server/current/run" in run
+    assert '# toolkit-release-run-v1' in run
+    assert '"$release/run"' in run
+    assert 'running-release' in run
     assert f'server/current/api' not in run
     assert 'make --no-print-directory start' not in run
+    old_run = "#!/bin/sh\nset -e\nexec 2>&1\nexec s6-envdir ./env s6-setuidgid 'demo-api' ./server/current/run\n"
+    (api/'run').write_text(old_run)
+    remote('setup', 'service', 'demo', 'api')
+    assert '# toolkit-release-run-v1' in (api/'run').read_text()
+    (api/'run').write_text('#!/bin/sh\n# custom runner\nexit 0\n')
+    remote('setup', 'service', 'demo', 'api')
+    assert (api/'run').read_text() == '#!/bin/sh\n# custom runner\nexit 0\n'
+    (api/'run').write_text(run)
     assert f"exec s6-setuidgid 'demo-apilog' s6-log t s1048576 n100 ./main" in (api/'log/run').read_text()
     assert api.stat().st_mode & 0o777 == 0o755
     assert (api/'env').stat().st_mode & 0o777 == 0o755
@@ -318,6 +346,7 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
             future.result()
     assert (host/'users.json').read_bytes() == users_before
     assert remote('status', 'demo').count('awaiting-runtime') == 2
+    assert 'not-running' in remote('releases', 'demo')
     # Generated bin/deploy extracts as the owner and activates each service independently.
     release = root/'release-001'
     for name in ('api', 'dns'):
@@ -327,6 +356,12 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
         (artifact/'run').chmod(0o755)
         (artifact/'private.js').write_text('// application code\n')
         (artifact/'private.js').chmod(0o600)
+    commit = 'a' * 40
+    (release/'api/.toolkit-commit').write_text(commit + '\n')
+    expected_archive = root/'expected.tar.gz'
+    subprocess.run(['tar', '--format=ustar', '--mode=u+rwX,go+rX,go-w,a-s', '-czf',
+                    str(expected_archive), '-C', str(release/'api'), '.'], check=True)
+    expected_hash = hashlib.sha256(expected_archive.read_bytes()).hexdigest()
     remote('deploy', 'demo', str(release))
     current = api/'server/current'
     published = current.resolve()
@@ -339,6 +374,68 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     assert not (host/'var/repo').exists()
     assert (api/'down').exists()  # Deployment preserves an operator's down flag.
     assert str(api) in (host/'restarts').read_text()
+    metadata = dict(line.split('\t') for line in (api/'release').read_text().splitlines())
+    assert metadata['commit'] == commit
+    assert metadata['commit_source'] == 'artifact'
+    assert metadata['archive_sha256'] == expected_hash
+    assert metadata['release'] == published.name
+    dns_metadata = dict(line.split('\t') for line in (base('dns')/'release').read_text().splitlines())
+    assert dns_metadata['commit'] == checkout_commit
+    assert dns_metadata['commit_source'] == 'checkout-at-deploy'
+    assert dns_metadata['dirty'] == 'true'
+    assert (api/'releases'/published.name).read_bytes() == (api/'release').read_bytes()
+    assert (api/'release').stat().st_mode & 0o777 == 0o644
+    # Run the real generated startup script, mocking only s6's privilege/env tools.
+    runtime_env = dict(env, PATH=str(mocks) + ':' + env['PATH'])
+    process = subprocess.Popen([str(api/'run')], cwd=api, env=runtime_env,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 5
+        while not (api/'running-release').exists() and time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise AssertionError(process.communicate())
+            time.sleep(.02)
+        running = dict(line.split('\t') for line in (api/'running-release').read_text().splitlines())
+        assert running['pid'] == str(process.pid)
+        assert running['archive_sha256'] == expected_hash
+        status = remote('releases', 'demo', extra={'MOCK_SUPERVISED_PID': str(process.pid)})
+        assert 'api\truntime\tidentity\tverified' in status
+        assert f'api\trunning\tarchive_sha256\t{expected_hash}' in status
+        # Selecting a new release while the old process lives keeps its old identity.
+        remote('deploy', 'demo', 'api', str(release/'api'))
+        assert current.resolve() != published
+        status = remote('releases', 'demo', extra={'MOCK_SUPERVISED_PID': str(process.pid)})
+        assert f'api\trunning\trelease\t{published.name}' in status
+        assert f'api\tselected\trelease\t{current.resolve().name}' in status
+        original_running = (api/'running-release').read_text()
+        (api/'running-release').write_text(original_running.replace(running['process_start'], 'stale start'))
+        status = remote('releases', 'demo', extra={'MOCK_SUPERVISED_PID': str(process.pid)})
+        assert 'api\truntime\tidentity\tunknown' in status
+        assert 'api\trunning\tcommit' not in status
+        (api/'running-release').write_text(original_running)
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
+    assert 'api\truntime\tidentity\tnot-running' in remote('releases', 'demo')
+    (api/'running-release').unlink()
+    # Hash mismatch and metadata publication failure cannot change the active release.
+    before = current.resolve()
+    before_metadata = (api/'release').read_bytes()
+    bad_metadata = root/'bad.release'
+    bad_metadata.write_text('commit\tunknown\ncommit_source\tunknown\ndirty\tunknown\narchive_sha256\t' + '0'*64 + '\n')
+    failure = subprocess.run([str(api/'bin/deploy'), str(expected_archive), str(bad_metadata)],
+                             env=runtime_env, capture_output=True)
+    assert failure.returncode != 0 and b'SHA-256 mismatch' in failure.stderr
+    assert current.resolve() == before
+    remote('deploy', 'demo', 'api', str(release/'api'), ok=False, extra={'FAIL_HOST_SYNC': '1'})
+    assert current.resolve() == before
+    assert (api/'release').read_bytes() == before_metadata
+    # Invalid provenance is rejected before SSH, including multiple hash lines.
+    calls_before = (host/'ssh-calls').read_bytes()
+    (release/'api/.toolkit-commit').write_text(commit + '\n' + commit + '\n')
+    remote('deploy', 'demo', 'api', str(release/'api'), ok=False)
+    assert (host/'ssh-calls').read_bytes() == calls_before
+    (release/'api/.toolkit-commit').write_text(commit + '\n')
     dns_current = (base('dns')/'server/current').resolve()
     remote('deploy', 'demo', 'api', str(release/'api'))
     assert current.resolve() != published

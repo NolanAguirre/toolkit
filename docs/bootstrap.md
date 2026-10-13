@@ -7,6 +7,13 @@ Cursor rules and skills from `~/.s6craft`, and links the repository's
 `.cursorrules` to `~/.s6craft/.cursorrules`. The source
 `.cursorrules` must exist before creation; edits to it apply to all linked repos.
 
+Every `~/.s6craft/.cursor/rules/*.mdc` file is linked automatically, including
+`db-schema.mdc`. That rule uses `globs: db/**` and `alwaysApply: false` to scope
+the database conventions to the repository-root `db/` directory. Keep the shared
+rule in your home directory; future repositories receive the link on creation.
+Existing repositories need a `.cursor/rules/db-schema.mdc` symlink to that same
+shared file. Editing the shared rule then updates all linked repositories.
+
 ## Import an existing repository
 
 ```sh

@@ -232,50 +232,92 @@ failure and concurrent clients. These checks do not exercise a real SSH server,
 real user creation, actual systemd boot behavior or actual s6 supervision. No real
 host actions are needed for the tests. Run `toolkit test remote` for public command help checks.
 
-## Application releases and Makefile templates
+## Release artifacts and identities
 
 ```sh
-remote deploy homelab /path/to/homelab/.release/20260918T030000Z
+remote deploy my-repo /path/to/.release/build-001
+remote deploy my-repo api /path/to/.release/build-001/api
+remote releases my-repo
 ```
 
-The directory name identifies an immutable release. The directory must contain
-regular files/directories and a root `Makefile` exposing `deployment.deploy`.
-Build and package locally first, using an explicit application allowlist which
-excludes databases, environment files, credentials, node_modules and development
-servers. The toolkit stages a complete archive before SSH, normalizes new release
-permissions, extracts into a temporary host directory, then publishes it at
-`/opt/<repo>/releases/<name>`. Existing names fail without replacement. It runs
-`make deployment.deploy` there as root. Only deploy trusted application code.
-An application failure returns nonzero and retains the release for inspection.
-There is no automatic database rollback or release pruning.
+A repository bundle contains one directory per selected service, each with an
+executable `run` and its runtime files. Single-service deployment takes that
+service directory directly. The current toolkit does not deploy a root Makefile
+bundle into `/opt`; older application-specific packaging (including legacy
+homelab releases) must be adapted before using this service-artifact workflow.
+Package an explicit allowlist, excluding credentials and mutable application data.
 
-Reusable Makefile/root-forwarding and host-workflow templates live in
-`src/bootstrap.bin/template/deployment/`. Copy these into the application's
-`deployment/` directory, replace `__REPO__`, and include `deployment/root.mk` from
-the root Makefile. Implement the small application-specific scripts named by the
-targets. Copy `src/lib/files.sh`, `src/lib/remote-host.sh` and
-`src/remote.bin/.host/validate` into `deployment/toolkit/`; copy the host setup
-scripts too when the application ships standalone host preparation. These are
-ordinary shipped files: the host needs neither the source toolkit checkout nor
-the local registration state. Review/update the copied helpers when updating the
-toolkit. The template validator holds the same stable host lock throughout the
-workflow; transfer releases that lock before invoking the application's validator.
+The client creates each service's tar.gz and SHA-256 before SSH. The host verifies
+the hash, extracts as the deployment owner into
+`/var/service-dir/<repo>-<service>/server/server-<timestamp>-<random>`, and runs an
+optional `bin/deploy-prepare` hook as that owner. The root deploy command records
+metadata before atomically switching `server/current` and requesting an s6 restart.
+An operator's `down` flag remains in effect. Successful deployment does not prove
+that the new process has started or passed an application health check.
 
-Homelab implements the workflow in its own `deployment/Makefile`. From its checkout,
-`make deployment.push` builds both UIs, packages a fresh release and calls remote.
-On the host, `sudo make -C /opt/homelab/current deployment.status` checks runtime
-health; replace `status` with `restart` to restart. A manually copied release under
-`/opt/homelab/releases/<name>` can be installed with
-`sudo make -C /opt/homelab/releases/<name> deployment.deploy`.
+Four recent release directories are retained, plus an older release still named
+by the startup record. Failed preparation or metadata generation preserves the
+previous selection. Failures after activation can leave the new release selected;
+inspect `remote releases` before retrying. Services in a bundle activate separately,
+so a later service failure does not roll back earlier services.
 
-Homelab uses the API runtime account for all its cooperating processes, with
-private shared state in `/var/lib/homelab`; the toolkit's separate deployment/log
-accounts and existing service data directories are preserved. Its setup replaces
-the generic runners to select this common application identity. If running
-`remote setup service` later, follow with homelab's `deployment.setup` before
-restarting. Only its root-owned private dnsmasq executable receives port-binding
-capability. The shipped installation expects compatible Node >=22.13 at
-`/opt/node` and installs the Debian host dependencies. Migration failures leave
-services stopped for repair; migrations are forward-only. Backups precede repeat
-migrations, and no local database is transferred. Deployments include a short
-stop/migrate/start window, and old releases/backups are retained for manual cleanup.
+Metadata lives beside the service's `run` file, outside s6's private `supervise/`:
+
+```text
+/var/service-dir/my-repo-api/
+  run
+  release                       # last successfully recorded selection
+  running-release               # release launched by run, PID and process start
+  releases/server-...            # immutable identity for each deployed release
+  server/current -> server-...
+  server/server-.../run
+```
+
+These are root-owned, atomically replaced plain TSV files, readable without a
+language runtime. Release records contain `release`, `commit`, `commit_source`,
+`dirty`, `archive_sha256`, and `deployed_at`. The archive hash identifies the exact
+uploaded compressed artifact, not a later filesystem tree or files modified by
+`deploy-prepare`. Metadata records are kept even when old runtime directories are
+pruned. They do not contain passwords, environment values, or application logs.
+
+For reliable build provenance, the application packager should place a full
+lowercase Git commit hash in each artifact's `.toolkit-commit` when building it.
+That is recorded as `commit_source=artifact`, with dirty state unknown. Without
+that file, the toolkit records the registered checkout's HEAD and whether it has
+uncommitted/untracked changes at deployment time (`checkout-at-deploy`). That
+fallback is informational: an older prebuilt artifact need not match that HEAD.
+Non-Git sources report an unknown commit. The archive hash is always computed.
+
+The generated runner pins the resolved release path before executing it and
+records its PID/start time. `remote releases` asks s6 for the supervised PID and
+compares that identity with the startup record. It prints TSV rows with four
+columns: service, scope (`runtime`, `selected`, `running`), key, value. Runtime
+identity is `verified`, `not-running`, or `unknown`. A still-running old process
+can therefore differ from the newly selected release. An SSH or supervisor error,
+stale startup record, old/custom runner, or missing metadata never becomes an
+invented running commit. Verification identifies the launched process/artifact;
+it is not an application health check or proof of ongoing file integrity.
+
+After updating the local toolkit, existing hosts need their generated deploy
+commands and standard runners upgraded:
+
+```sh
+remote setup service my-repo --all
+```
+
+Setup upgrades an exact old toolkit-generated runner and preserves custom runners.
+It does not restart services. New identity records appear on the next deployment
+and process start. A custom runner must explicitly adopt the recording/pinned-path
+behavior before its running identity can be verified. Old releases cannot recover
+the original tar hash after the archive has been discarded. New deploy clients
+reject old host deploy scripts with an instruction to update them first.
+
+The dashboard's **Check host via SSH** action calls `remote releases` with a bounded
+timeout. It reports selected and verified running identities separately, including
+SSH failures. It does not deploy, restart, or trigger a supervisor scan. SSH keeps
+batch mode and strict host-key checking; establish trust through the normal SSH
+workflow before checking a new host.
+
+Reusable application Makefiles live in `src/bootstrap.bin/template/deployment/`.
+Their package step must produce the per-service artifact layout above. Application
+scripts still own builds, migrations, health checks and any customized runners.

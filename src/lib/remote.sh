@@ -54,6 +54,12 @@ SCRIPT
         printf 'TOOLKIT_RELEASE_ARCHIVE\n' >> "$payload"
     fi
     for step in "$@"; do
+        if [ "$step" = service ]; then
+            # Install the same portable atomic-write helpers used by host commands.
+            printf "host_helpers=\$(cat <<'TOOLKIT_HOST_HELPERS'\n" >> "$payload"
+            cat "$REMOTE_BIN/../lib/remote-host.sh" >> "$payload"
+            printf '\nTOOLKIT_HOST_HELPERS\n)\n' >> "$payload"
+        fi
         cat "$REMOTE_BIN/.host/$step" >> "$payload"
     done
     cat >> "$payload" <<'WRAPPER'

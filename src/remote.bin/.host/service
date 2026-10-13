@@ -20,17 +20,24 @@ for entry in "$@"; do
     require_file_target "$base/down"
     require_file_target "$base/bin/deploy"
     require_file_target "$base/bin/deploy-prepare"
+    require_file_target "$base/bin/toolkit-host.sh"
+    require_file_target "$base/release"
+    require_file_target "$base/running-release"
 done
 for entry in "$@"; do
     service_names "$entry"
-    # The application owns its stable runner; setup must preserve it.
-    if [ ! -f "$base/run" ]; then
-        atomic_to "$base/run" "root:$root_group" 755 cat <<RUN
+    make_directory "$base/releases" root 755
+    atomic_to "$base/bin/toolkit-host.sh" "root:$root_group" 644 printf '%s\n' "$host_helpers"
+    # Upgrade only an exact old toolkit runner; preserve application-owned runners.
+    old_runner=$(cat <<RUN
 #!/bin/sh
 set -e
 exec 2>&1
 exec s6-envdir ./env s6-setuidgid '$runtime' ./server/current/run
 RUN
+)
+    if [ ! -f "$base/run" ] || [ "$(cat "$base/run")" = "$old_runner" ]; then
+        atomic_to "$base/run" "root:$root_group" 755 service_run_script
     fi
     atomic_to "$base/log/run" "root:$root_group" 755 cat <<RUN
 #!/bin/sh

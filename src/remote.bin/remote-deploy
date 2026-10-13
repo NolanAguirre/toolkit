@@ -7,6 +7,9 @@
 ## A single-service directory contains run and its packaged files directly.
 ## Each run must be executable and keep the service in the foreground.
 ## Deploy as the service owner, atomically switch current, retain four releases and restart with s6.
+## Record archive SHA-256 and Git provenance beside the service run file.
+## A service artifact may include .toolkit-commit containing its full build commit.
+## Otherwise record the registered checkout's HEAD at deploy time, not a proven build commit.
 ##</help>
 set -e
 . "$REMOTE_BIN/../lib/remote.sh"
@@ -18,6 +21,18 @@ fi
 upload=$(mktemp -d "$REMOTE_STATE/.deploy.XXXXXX")
 trap 'rm -rf -- "$upload"' 0
 trap 'exit 1' HUP INT TERM
+repo_path=$(cat "$UTIL_PATH/bootstrap/repos/$REMOTE_REPO/path")
+checkout_commit=unknown
+checkout_dirty=unknown
+if command -v git >/dev/null 2>&1 && checkout_commit=$(git -C "$repo_path" rev-parse --verify HEAD 2>/dev/null); then
+    checkout_changes=$(git -C "$repo_path" status --porcelain --untracked-files=normal) || remote_error 'cannot inspect checkout changes'
+    checkout_dirty=false
+    if [ -n "$checkout_changes" ]; then
+        checkout_dirty=true
+    fi
+else
+    checkout_commit=unknown
+fi
 # Package every artifact before SSH; malformed bundles never partly deploy.
 while IFS= read -r entry; do
     service=${entry%:*}
@@ -29,13 +44,31 @@ while IFS= read -r entry; do
     [ -f "$source/run" ] && [ -x "$source/run" ] || remote_error "service artifact needs executable run: $source/run"
     special=$(find "$source" ! -type f ! -type d -print)
     [ -z "$special" ] || remote_error 'release may contain only regular files and directories'
+    commit=$checkout_commit
+    commit_source=checkout-at-deploy
+    dirty=$checkout_dirty
+    if [ -f "$source/.toolkit-commit" ]; then
+        commit=$(cat "$source/.toolkit-commit")
+        case "$commit" in
+            ''|*[!0-9a-f]*)
+                remote_error '.toolkit-commit must contain a full lowercase Git commit hash'
+                ;;
+        esac
+        [ "${#commit}" -eq 40 ] || [ "${#commit}" -eq 64 ] || remote_error '.toolkit-commit must contain a full Git commit hash'
+        commit_source=artifact
+        dirty=unknown
+    fi
     tar --format=ustar --mode='u+rwX,go+rX,go-w,a-s' -czf "$upload/$service.tar.gz" -C "$source" .
+    archive_hash=$(sha256sum "$upload/$service.tar.gz")
+    archive_hash=${archive_hash%% *}
+    printf 'commit\t%s\ncommit_source\t%s\ndirty\t%s\narchive_sha256\t%s\n' \
+        "$commit" "$commit_source" "$dirty" "$archive_hash" > "$upload/$service.release"
 done < "$REMOTE_MANIFEST"
 REMOTE_ARCHIVE="$upload/bundle.tar.gz"
 # Use the manifest rather than a wildcard that could include the bundle itself.
 set --
 while IFS= read -r entry; do
-    set -- "$@" "${entry%:*}.tar.gz"
+    set -- "$@" "${entry%:*}.tar.gz" "${entry%:*}.release"
 done < "$REMOTE_MANIFEST"
 tar -czf "$REMOTE_ARCHIVE" -C "$upload" "$@"
 remote_send deploy

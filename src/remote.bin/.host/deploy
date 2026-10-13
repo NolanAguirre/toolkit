@@ -15,6 +15,7 @@ for entry in "$@"; do
     require_file_target "$base/bin/deploy"
     require_file_target "$base/bin/deploy-prepare"
     [ -x "$base/bin/deploy" ] || fail "run remote setup service for $service first"
+    grep -q '^# toolkit-release-metadata-v1$' "$base/bin/deploy" || fail "update $service with remote setup service before deploying release metadata"
     s6-svok "$base" || fail "run remote setup supervision for $service first"
 done
 incoming=$(mktemp -d /tmp/toolkit-deploy.XXXXXX)
@@ -25,9 +26,10 @@ tar xzf "$archive" -C "$incoming"
 for entry in "$@"; do
     service_names "$entry"
     [ -f "$incoming/$service.tar.gz" ] && [ ! -L "$incoming/$service.tar.gz" ] || fail "missing artifact for $service"
+    [ -f "$incoming/$service.release" ] && [ ! -L "$incoming/$service.release" ] || fail "missing metadata for $service"
 done
 for entry in "$@"; do
     service_names "$entry"
-    "$base/bin/deploy" "$incoming/$service.tar.gz"
+    "$base/bin/deploy" "$incoming/$service.tar.gz" "$incoming/$service.release"
     printf '%s\tdeployed\t%s\n' "$service" "$base/server/current"
 done
