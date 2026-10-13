@@ -12,6 +12,59 @@ remote_token() {
     esac
 }
 
+# Connection values are data, never shell fragments or SSH options.
+remote_connection_validate() {
+    case "$REMOTE_TARGET" in
+        ''|-*|*[!a-zA-Z0-9.:-]*)
+            remote_error 'host must be an IP address or DNS hostname, without a scheme or port'
+            ;;
+    esac
+    case "$REMOTE_USER" in
+        ''|[!a-zA-Z0-9_]*|*[!a-zA-Z0-9_.-]*)
+            remote_error 'SSH user must be a simple account name'
+            ;;
+    esac
+    case "$REMOTE_PORT" in
+        ''|*[!0-9]*)
+            remote_error 'SSH port must be between 1 and 65535'
+            ;;
+    esac
+    [ "${#REMOTE_PORT}" -le 5 ] && [ "$REMOTE_PORT" -ge 1 ] && [ "$REMOTE_PORT" -le 65535 ] || remote_error 'SSH port must be between 1 and 65535'
+    case "$REMOTE_IDENTITY" in
+        ''|/*)
+            ;;
+        *)
+            remote_error 'identity file must be an absolute path'
+            ;;
+    esac
+    if [ "$(printf '%s' "$REMOTE_IDENTITY" | LC_ALL=C tr -d '[:cntrl:]')" != "$REMOTE_IDENTITY" ]; then
+        remote_error 'identity file path must not contain control characters'
+    fi
+}
+
+# Preserve existing one-line aliases until explicitly replaced with a direct host.
+remote_target_load() {
+    REMOTE_TARGET=
+    REMOTE_USER=
+    REMOTE_PORT=
+    REMOTE_IDENTITY=
+    if [ "${1%/*}" = "$REMOTE_STATE/connections" ] || jq -e 'type == "object"' "$1" >/dev/null 2>&1; then
+        jq -e -s 'length == 1 and (.[0] | keys - ["host", "user", "port", "identityFile"] == [] and
+            (.host | type == "string") and (.user | type == "string") and
+            (.port | type == "number" and . == floor and . >= 1 and . <= 65535) and
+            (.identityFile == null or (.identityFile | type == "string")) and
+            (to_entries | all(.value | if type == "string" then test("[\u0000-\u001f\u007f]") | not else true end)))' "$1" >/dev/null || remote_error 'invalid target JSON'
+        REMOTE_TARGET=$(jq -r '.host' "$1")
+        REMOTE_USER=$(jq -r '.user' "$1")
+        REMOTE_PORT=$(jq -r '.port' "$1")
+        REMOTE_IDENTITY=$(jq -r '.identityFile // ""' "$1")
+        remote_connection_validate
+    else
+        REMOTE_TARGET=$(cat "$1")
+        remote_token "$REMOTE_TARGET" || remote_error 'invalid target file; replace it with remote edit'
+    fi
+}
+
 # Stage complete scripts on both ends before executing under the portable s6 lock.
 remote_send() (
     payload=$(mktemp "$REMOTE_STATE/.ssh.XXXXXX")
@@ -66,6 +119,12 @@ SCRIPT
 TOOLKIT_HOST_SCRIPT
 s6-setlock -d 9 /var/run/toolkit-remote.lock env TOOLKIT_REMOTE_LOCKED=1 sh "$remote_host_script"
 WRAPPER
-    ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
-        "$REMOTE_TARGET" 'sudo -n sh -s' < "$payload"
+    set -- -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10
+    if [ -n "$REMOTE_USER" ]; then
+        set -- "$@" -F /dev/null -l "$REMOTE_USER" -p "$REMOTE_PORT"
+        if [ -n "$REMOTE_IDENTITY" ]; then
+            set -- "$@" -o IdentitiesOnly=yes -i "$REMOTE_IDENTITY"
+        fi
+    fi
+    ssh "$@" "$REMOTE_TARGET" 'sudo -n sh -s' < "$payload"
 )

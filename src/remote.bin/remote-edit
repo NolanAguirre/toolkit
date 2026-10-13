@@ -1,13 +1,17 @@
 #!/bin/sh
 ##<help>
 ## edit - Edit the SSH target for a bootstrap repository.
-## Usage: remote edit <repo> <ssh-config-alias>
-## SSH configuration supplies hostname, user, port and identity; no passwords are stored.
+## Usage: remote edit <repo> <host-or-connection> [--user user] [--port port] [--identity-file path]
+## Replace connection settings, including legacy aliases, with a direct IP/DNS target.
+## Accept user@host or ssh://user@host:port. Options override connection values; port defaults to 22.
+## Identity is an optional absolute path. SSH config is not used. Replace the complete JSON config.
+## Save locally without contacting the host or storing passwords/private keys.
 ##</help>
 set -e
 . "$REMOTE_BIN/../lib/files.sh"
-if [ ! -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
+if [ ! -f "$REMOTE_CONFIG" ] && [ ! -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
     echo 'error: target missing; use remote create' >&2
     exit 1
 fi
-atomic_write "$REMOTE_STATE/targets/$REMOTE_REPO" printf '%s\n' "$2"
+atomic_write "$REMOTE_CONFIG" jq -n --arg host "$REMOTE_TARGET" --arg user "$REMOTE_USER" --arg port "$REMOTE_PORT" --arg identity "$REMOTE_IDENTITY" \
+    '{host: $host, user: $user, port: ($port | tonumber), identityFile: (if $identity == "" then null else $identity end)}'

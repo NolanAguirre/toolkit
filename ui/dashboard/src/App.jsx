@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
 
+let DevTools = ({ children }) => children
+let DevScope = ({ children }) => children
+if (import.meta.env.DEV) {
+  const dev = await import('./devInspector.jsx')
+  DevTools = dev.DevTools
+  DevScope = dev.DevScope
+}
+
 async function api(url, body, signal) {
   const response = await fetch(url, {
     signal,
@@ -47,7 +55,7 @@ function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose
     setBusy(false)
   }
 
-  return <section className="panel form-panel" aria-labelledby="form-title">
+  return <DevScope id="s5d2f6g" state={{ kind, busy, created, error: Boolean(error) }}><section className="panel form-panel" aria-labelledby="form-title">
     <div className="panel-heading"><div><p className="eyebrow">{repo && !['create', 'import'].includes(kind) ? repo.name : 'WORKSPACE'}</p><h2 id="form-title">{labels[kind]}</h2></div><button type="button" disabled={busy} onClick={onClose}>Cancel</button></div>
     <form onSubmit={submit}>
       <fieldset disabled={busy || created}>
@@ -61,14 +69,14 @@ function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose
       </fieldset>
       {error && <div className="form-error" role="alert"><p>{error}</p><span className="hint">Check the repository before retrying if bootstrap reports partial work.</span></div>}
     </form>
-  </section>
+  </section></DevScope>
 }
 
-function ResourceList({ title, items, kind, onAdd, busy }) {
-  return <section className="panel resource-panel">
+function ResourceList({ title, items, kind, onAdd, busy, devId }) {
+  return <DevScope id={devId} state={{ kind, count: items.length }}><section className="panel resource-panel">
     <div className="panel-heading"><h2>{title} <span className="count">{items.length}</span></h2><button aria-label={labels[kind]} disabled={busy} onClick={() => onAdd(kind)}>+ Add</button></div>
     {items.length === 0 ? <p className="empty">No {title.toLowerCase()} yet.</p> : <ul className="resources">{items.map(item => <li key={item.name}><div><strong>{item.name}</strong><span className="path">{item.path}</span></div>{item.port && <span className="badge">Port {item.port}</span>}</li>)}</ul>}
-  </section>
+  </section></DevScope>
 }
 
 function ReleaseIdentity({ title, release }) {
@@ -81,9 +89,47 @@ function ReleaseIdentity({ title, release }) {
   </dl>{release.commit_source === 'checkout-at-deploy' && <p className="hint">This commit was observed in the checkout when deploying. It does not prove which commit built the artifact.</p>}</div>
 }
 
-function DeploymentView({ data, repo }) {
+function DeploymentView({ data, repo, busy, setBusy }) {
   const [live, setLive] = useState(null)
   const [checking, setChecking] = useState(false)
+  const [releasePath, setReleasePath] = useState('')
+  const [service, setService] = useState('')
+  const [deploying, setDeploying] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+  const [target, setTarget] = useState(data.remoteConnection)
+  const [connection, setConnection] = useState(data.remoteConnection?.legacy ? '' : data.remoteConnection?.host || '')
+  const [sshUser, setSshUser] = useState(data.remoteConnection?.user || '')
+  const [sshPort, setSshPort] = useState(data.remoteConnection?.port?.toString() || '')
+  const [identityFile, setIdentityFile] = useState(data.remoteConnection?.identityFile || '')
+  const [targetChanged, setTargetChanged] = useState(false)
+  const [targetError, setTargetError] = useState(data.remoteError || '')
+  const [targetNotice, setTargetNotice] = useState('')
+  async function saveTarget(event) {
+    event.preventDefault()
+    setBusy(true)
+    setTargetError('')
+    setTargetNotice('')
+    try {
+      const saved = await api(`/api/repos/${encodeURIComponent(repo.name)}/target`, {
+        connection,
+        ...(sshUser ? { user: sshUser } : {}),
+        ...(sshPort ? { port: Number(sshPort) } : {}),
+        ...(identityFile ? { identityFile } : {}),
+      })
+      setTarget(saved.target)
+      setConnection(saved.target.host)
+      setSshUser(saved.target.user)
+      setSshPort(String(saved.target.port))
+      setIdentityFile(saved.target.identityFile || '')
+      setTargetChanged(false)
+      setTargetNotice('Target saved. No host connection was made.')
+      setLive(null)
+      setResult(null)
+      setError('')
+    } catch (failure) { setTargetError(failure.message) }
+    finally { setBusy(false) }
+  }
   async function checkHost() {
     setChecking(true)
     setLive(null)
@@ -93,10 +139,55 @@ function DeploymentView({ data, repo }) {
       setLive({ error: error.message, services: [], checkedAt: new Date().toISOString() })
     } finally { setChecking(false) }
   }
-  return <section className="panel">
-    <div className="panel-heading"><div><h2>Deployments</h2><p>Running services, release identities, and local packages</p></div><button onClick={checkHost} disabled={checking || !data.remoteTarget}>{checking ? 'Checking host…' : 'Check host via SSH'}</button></div>
-    <div className="deployment-summary"><div><span className="eyebrow">REMOTE TARGET</span><p>{data.remoteTarget || 'No registered target'}</p></div><div><span className="eyebrow">LIVE STATUS</span><p>{checking ? 'Checking…' : live?.error ? 'Check failed' : live ? 'Checked' : 'Not checked'}</p></div></div>
-    {data.remoteError && <p className="notice">Remote configuration unavailable: {data.remoteError}</p>}
+  async function deploy(event) {
+    event.preventDefault()
+    if (busy || checking) return
+    setBusy(true)
+    setDeploying(true)
+    setResult(null)
+    setError('')
+    setLive(null)
+    try {
+      setResult(await api(`/api/repos/${encodeURIComponent(repo.name)}/deployments`, { releasePath, ...(service ? { service } : {}) }))
+    } catch (failure) {
+      setError(failure.message)
+    } finally {
+      setDeploying(false)
+      await checkHost()
+      setBusy(false)
+    }
+  }
+  return <DevScope id="r9t3y7u" state={{ repo: repo.name, checking, deploying, live: live?.error ? 'error' : live ? 'checked' : 'idle' }}><section className="panel">
+    <div className="panel-heading"><div><h2>Deployments</h2><p>Running services, release identities, and local packages</p></div><button onClick={checkHost} disabled={busy || checking || !target || targetChanged}>{checking ? 'Checking host…' : 'Check host via SSH'}</button></div>
+    <div className="deployment-summary"><div><span className="eyebrow">REMOTE TARGET</span><p>{target ? `${target.user ? `${target.user}@` : ''}${target.host}${target.port ? ` · port ${target.port}` : ''}` : 'No registered target'}</p></div><div><span className="eyebrow">LIVE STATUS</span><p>{checking ? 'Checking…' : live?.error ? 'Check failed' : live ? 'Checked' : 'Not checked'}</p></div></div>
+    <form className="deploy-form" onSubmit={saveTarget} onChange={() => { setTargetChanged(true); setTargetNotice('') }} aria-label="Deployment target">
+      <h3>Deployment target</h3>
+      {target?.legacy && <p className="notice">This target uses a legacy SSH alias. Save an IP address, DNS hostname or connection string to replace it.</p>}
+      <fieldset disabled={busy || checking}>
+        <label>Host or SSH connection<input required value={connection} onChange={event => { setConnection(event.target.value); setSshUser(''); setSshPort('') }} placeholder="192.168.1.50 or ssh://deploy@example.com:2222" /><span className="hint">Accepts an IP address, DNS hostname, user@host or ssh://user@host:port.</span></label>
+        <label>SSH user<input value={sshUser} onChange={event => setSshUser(event.target.value)} placeholder="deploy" /><span className="hint">Required for a bare host. If supplied here, overrides the connection string’s user.</span></label>
+        <label>SSH port<input type="number" min="1" max="65535" step="1" value={sshPort} onChange={event => setSshPort(event.target.value)} placeholder="22" /><span className="hint">Optional override; defaults to the connection string’s port or 22.</span></label>
+        <label>SSH key path<input value={identityFile} onChange={event => setIdentityFile(event.target.value)} placeholder="/home/you/.ssh/id_ed25519" pattern="/.*" /><span className="hint">Optional absolute path on the API machine. Otherwise uses default SSH keys or the agent.</span></label>
+        <button type="submit">Save target</button>
+      </fieldset>
+      <p className="hint">Connection settings are saved locally as JSON. No SSH config entry is needed. The host needs SSH access, s6 and noninteractive sudo for deployment.</p>
+      {targetChanged && <p className="hint">Save target changes before checking or deploying.</p>}
+      {targetError && <p className="form-error" role="alert">{targetError}</p>}
+      {targetNotice && <p className="success" role="status">{targetNotice}</p>}
+    </form>
+    <form className="deploy-form" onSubmit={deploy} aria-label="Deploy release">
+      <fieldset disabled={busy || checking || !target || targetChanged}>
+        <label>Service<select value={service} onChange={event => { setService(event.target.value); setReleasePath('') }}><option value="">All services</option>{data.services.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>Release directory<input required value={releasePath} onChange={event => setReleasePath(event.target.value)} list="release-paths" placeholder={service ? `/absolute/path/to/release/${service}` : '/absolute/path/to/release'} pattern="/.*" /><span className="hint">{service ? 'Choose the prepared service directory containing an executable run file.' : 'Choose a prepared bundle containing a directory with an executable run file for every service.'}</span></label>
+        <datalist id="release-paths">{data.releases.map(release => <option key={release.path} value={service ? `${release.path}/${service}` : release.path} />)}</datalist>
+        <p className="hint">Deploys to {target?.host || 'the registered SSH target'}, selects the release and requests service restarts. Services marked down stay down. Build and package artifacts before deploying.</p>
+        <button className="primary" type="submit">{deploying ? 'Deploying…' : `Deploy ${service || 'all services'}`}</button>
+      </fieldset>
+      {!target && <p className="hint">Save a deployment target above, then prepare it with <code>remote setup all {repo.name}</code>.</p>}
+      {deploying && <p role="status">Uploading and deploying the release…</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {result && <div role="status"><p className="success">Deployment command completed. Host status below reports what is running; application health is not checked.</p>{result.output && <pre className="deploy-output">{result.output}</pre>}</div>}
+    </form>
     {live && <section className="live-releases" aria-live="polite"><p className="hint">Checked {new Date(live.checkedAt).toLocaleString()}</p>
       {live.error ? <p className="form-error" role="alert">{live.error}</p> : live.services.map(service => <article className="live-service" key={service.name}>
         <div className="panel-heading"><h3>{service.name}</h3><span className="badge">{service.runtime.state}{service.runtime.state === 'up' ? ` · PID ${service.runtime.pid}` : ''}</span></div>
@@ -108,7 +199,7 @@ function DeploymentView({ data, repo }) {
     <div className="panel-heading"><h3>Local releases <span className="count">{data.releases.length}</span></h3></div>
     {data.releases.length ? <ul className="resources">{data.releases.map(release => <li key={release.name}><div><strong>{release.name}</strong><span className="path">{release.path}</span></div><time dateTime={release.modifiedAt} title="Directory modified time">{new Date(release.modifiedAt).toLocaleString()}</time></li>)}</ul> : <p className="empty">No packaged releases in .release/ yet.</p>}
     <p className="notice">Local packages do not indicate what is running. Check host via SSH reads release metadata and s6 process state without deploying or restarting services.</p>
-  </section>
+  </section></DevScope>
 }
 
 export default function App() {
@@ -175,26 +266,26 @@ export default function App() {
   }
 
   const repo = repos.find(repo => repo.name === selected)
-  return <main>
-    <header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><span className="local">Local workspace</span></header>
-    <section className="intro"><div><p className="eyebrow">WORKSPACE</p><h1>Build from here.</h1><p>Scaffold your next service. Keep every repository in view.</p></div><div className="actions"><button disabled={busy || loading} onClick={() => setForm('import')}>Import repo</button><button className="primary" disabled={busy || loading} onClick={() => setForm('create')}>+ New repo</button></div></section>
-    {notice && <p className="success" role="status">{notice}</p>}
-    {error && <p className="error" role="alert">{error}</p>}
+  return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
+    <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><span className="local">Local workspace</span></header></DevScope>
+    <DevScope id="h6c1v5b"><section className="intro"><div><p className="eyebrow">WORKSPACE</p><h1>Build from here.</h1><p>Scaffold your next service. Keep every repository in view.</p></div><div className="actions"><button disabled={busy || loading} onClick={() => setForm('import')}>Import repo</button><button className="primary" disabled={busy || loading} onClick={() => setForm('create')}>+ New repo</button></div></section></DevScope>
+    {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
+    {error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
     {form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />}
     <div className="workspace">
-      <aside className="panel repo-list" aria-label="Repositories"><div className="panel-heading"><h2>Repositories <span className="count">{repos.length}</span></h2><button disabled={busy || loading} onClick={() => refresh()} aria-label="Refresh repositories">↻</button></div>
+      <DevScope id="z8x3c7v" state={{ count: repos.length, selected }}><aside className="panel repo-list" aria-label="Repositories"><div className="panel-heading"><h2>Repositories <span className="count">{repos.length}</span></h2><button disabled={busy || loading} onClick={() => refresh()} aria-label="Refresh repositories">↻</button></div>
         {loading && <p className="empty">Refreshing…</p>}
         {!loading && !repos.length && <p className="empty">Create or import your first repository.</p>}
         {repos.map(item => <button key={item.name} className={`repo-choice ${selected === item.name ? 'active' : ''}`} aria-pressed={selected === item.name} disabled={busy} onClick={() => { setSelected(item.name); setForm(null); setError(''); setNotice('') }}><span>{item.name}</span>{item.current && <span className="selection-dot" title="Current bootstrap selection" aria-label="Current bootstrap selection" />}</button>)}
-      </aside>
-      <div className="repo-content">
+      </aside></DevScope>
+      <DevScope id="l2k6z5x" state={{ repo: repo?.name, view }}><div className="repo-content">
         {repo ? <>
-          <div className="repo-heading"><div><h2>{repo.name}</h2><p className="path">{repo.path}</p></div>{repo.current ? <span className="badge">Current in bootstrap</span> : <button disabled={busy} onClick={selectCurrent}>Set current</button>}</div>
-          <nav className="tabs" aria-label="Repository view"><button disabled={busy} className={view === 'resources' ? 'active' : ''} aria-pressed={view === 'resources'} onClick={() => { setView('resources'); setError('') }}>Services & UIs</button><button disabled={busy} className={view === 'deployments' ? 'active' : ''} aria-pressed={view === 'deployments'} onClick={() => { setView('deployments'); setForm(null); setError('') }}>Deployments</button></nav>
-          {view === 'resources' ? detail ? <div className="resource-stack"><ResourceList title="Services" kind="services" items={detail.services} onAdd={setForm} busy={busy} /><ResourceList title="UIs" kind="uis" items={detail.uis} onAdd={setForm} busy={busy} /><ResourceList title="Databases" kind="databases" items={detail.databases} onAdd={setForm} busy={busy} /></div> : <p className="empty">{error ? 'Could not load this repository.' : 'Loading repository…'}</p> : deployment ? <DeploymentView key={selected} data={deployment} repo={repo} /> : <p className="empty">{error ? 'Could not load deployment details.' : 'Loading deployments…'}</p>}
+          <DevScope id="p8a3s7d" state={{ name: repo.name, current: Boolean(repo.current) }}><div className="repo-heading"><div><h2>{repo.name}</h2><p className="path">{repo.path}</p></div>{repo.current ? <span className="badge">Current in bootstrap</span> : <button disabled={busy} onClick={selectCurrent}>Set current</button>}</div></DevScope>
+          <DevScope id="f1g5h9j" state={{ view }}><nav className="tabs" aria-label="Repository view"><button disabled={busy} className={view === 'resources' ? 'active' : ''} aria-pressed={view === 'resources'} onClick={() => { setView('resources'); setError('') }}>Services & UIs</button><button disabled={busy} className={view === 'deployments' ? 'active' : ''} aria-pressed={view === 'deployments'} onClick={() => { setView('deployments'); setForm(null); setError('') }}>Deployments</button></nav></DevScope>
+          {view === 'resources' ? detail ? <div className="resource-stack"><ResourceList devId="t4y8u2i" title="Services" kind="services" items={detail.services} onAdd={setForm} busy={busy} /><ResourceList devId="n4p7q2w" title="UIs" kind="uis" items={detail.uis} onAdd={setForm} busy={busy} /><ResourceList devId="h8j3k6m" title="Databases" kind="databases" items={detail.databases} onAdd={setForm} busy={busy} /></div> : <p className="empty">{error ? 'Could not load this repository.' : 'Loading repository…'}</p> : deployment ? <DeploymentView key={selected} data={deployment} repo={repo} busy={busy} setBusy={setBusy} /> : <p className="empty">{error ? 'Could not load deployment details.' : 'Loading deployments…'}</p>}
         </> : <section className="panel empty">Select a repository to view its services, UIs, and deployments.</section>}
-      </div>
+      </div></DevScope>
     </div>
-    <footer>Toolkit dashboard <span>Powered by the toolkit CLI</span></footer>
-  </main>
+    <DevScope id="e3r7t1y"><footer>Toolkit dashboard <span>Powered by the toolkit CLI</span></footer></DevScope>
+  </main></DevScope></DevTools>
 }

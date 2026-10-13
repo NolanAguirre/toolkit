@@ -16,15 +16,74 @@ case "$command" in
         . "$REMOTE_BIN/.sync-validate"
         ;;
 esac
+command -v jq >/dev/null 2>&1 || remote_error 'jq is required for remote target configuration'
 case "$action" in
     remote-ls)
         [ "$#" -eq 0 ] || remote_error 'usage: remote ls'
-        export REMOTE_STATE
+        export REMOTE_STATE REMOTE_BIN
         exec "$command" "$@"
         ;;
     remote-create|remote-edit)
-        [ "$#" -eq 2 ] || remote_error 'usage: remote create|edit <repo> <ssh-config-alias>'
-        remote_token "$2" || remote_error 'SSH target must be a config alias containing letters, digits, dots, underscores or hyphens'
+        [ -d "$REMOTE_STATE/connections" ] || remote_error 'run toolkit setup remote to initialize JSON connection settings'
+        [ "$#" -ge 2 ] || remote_error 'usage: remote create|edit <repo> <host-or-connection> [--user user] [--port port] [--identity-file path]'
+        repo=$1
+        connection=$2
+        REMOTE_TARGET=$connection
+        REMOTE_USER=
+        REMOTE_PORT=22
+        REMOTE_IDENTITY=
+        case "$REMOTE_TARGET" in
+            ssh://*)
+                REMOTE_TARGET=${REMOTE_TARGET#ssh://}
+                REMOTE_TARGET=${REMOTE_TARGET%/}
+                ;;
+        esac
+        case "$REMOTE_TARGET" in
+            *@*)
+                REMOTE_USER=${REMOTE_TARGET%%@*}
+                REMOTE_TARGET=${REMOTE_TARGET#*@}
+                ;;
+        esac
+        case "$REMOTE_TARGET" in
+            \[*\]:*)
+                REMOTE_PORT=${REMOTE_TARGET##*]:}
+                REMOTE_TARGET=${REMOTE_TARGET%]:*}
+                REMOTE_TARGET=${REMOTE_TARGET#\[}
+                ;;
+            \[*\])
+                REMOTE_TARGET=${REMOTE_TARGET#\[}
+                REMOTE_TARGET=${REMOTE_TARGET%\]}
+                ;;
+            *:*:*)
+                # Unbracketed IPv6 has no port suffix.
+                ;;
+            *:*)
+                REMOTE_PORT=${REMOTE_TARGET##*:}
+                REMOTE_TARGET=${REMOTE_TARGET%:*}
+                ;;
+        esac
+        shift 2
+        while [ "$#" -gt 0 ]; do
+            [ "$#" -ge 2 ] || remote_error 'connection options require a value'
+            case "$1" in
+                --user)
+                    REMOTE_USER=$2
+                    ;;
+                --port)
+                    REMOTE_PORT=$2
+                    ;;
+                --identity-file)
+                    REMOTE_IDENTITY=$2
+                    ;;
+                *)
+                    remote_error 'expected --user, --port or --identity-file'
+                    ;;
+            esac
+            shift 2
+        done
+        set -- "$repo" "$connection"
+        remote_connection_validate
+        export REMOTE_TARGET REMOTE_USER REMOTE_PORT REMOTE_IDENTITY
         ;;
     remote-rm|remote-status|remote-releases)
         [ "$#" -eq 1 ] || remote_error 'usage: remote rm|status|releases <repo>'
@@ -62,6 +121,8 @@ else
 fi
 remote_token "$REMOTE_REPO" || remote_error 'repo must be a registered bootstrap name'
 export REMOTE_BIN REMOTE_STATE REMOTE_REPO
+REMOTE_CONFIG="$REMOTE_STATE/connections/$REMOTE_REPO.json"
+export REMOTE_CONFIG
 # Removing a target must also work after its repository has been unregistered.
 if [ "$action" = remote-rm ]; then
     exec "$command" "$@"
@@ -78,9 +139,13 @@ case "$action" in
         exec "$command" "$@"
         ;;
 esac
-[ -f "$REMOTE_STATE/targets/$REMOTE_REPO" ] || remote_error 'target missing; use remote create <repo> <ssh-config-alias>'
-REMOTE_TARGET=$(cat "$REMOTE_STATE/targets/$REMOTE_REPO")
-remote_token "$REMOTE_TARGET" || remote_error 'invalid registered SSH alias'
+if [ -f "$REMOTE_CONFIG" ]; then
+    remote_target_load "$REMOTE_CONFIG"
+elif [ -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
+    remote_target_load "$REMOTE_STATE/targets/$REMOTE_REPO"
+else
+    remote_error 'target missing; use remote create <repo> <host-or-connection> [--user user]'
+fi
 command -v ssh >/dev/null 2>&1 || remote_error 'ssh is required'
 REMOTE_MANIFEST=$(mktemp "$REMOTE_STATE/.services.XXXXXX")
 trap 'rm -f -- "$REMOTE_MANIFEST"' 0
@@ -140,6 +205,6 @@ done
 if ! awk -F: '$2 != "-" { if (seen[$2]++) exit 1 }' "$REMOTE_MANIFEST"; then
     remote_error 'services have duplicate ports'
 fi
-export REMOTE_TARGET REMOTE_MANIFEST
+export REMOTE_TARGET REMOTE_USER REMOTE_PORT REMOTE_IDENTITY REMOTE_MANIFEST
 # Keep the locks and cleanup trap in this parent until SSH and all children exit.
 "$command" "$@"

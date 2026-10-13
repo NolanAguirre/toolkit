@@ -5,4 +5,13 @@
 ## Leave the repository and remote host untouched.
 ##</help>
 set -e
-rm -- "$REMOTE_STATE/targets/$REMOTE_REPO"
+if [ ! -f "$REMOTE_CONFIG" ] && [ ! -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
+    echo 'error: target missing' >&2
+    exit 1
+fi
+if [ -f "$REMOTE_CONFIG" ]; then
+    rm -- "$REMOTE_CONFIG"
+fi
+if [ -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
+    rm -- "$REMOTE_STATE/targets/$REMOTE_REPO"
+fi

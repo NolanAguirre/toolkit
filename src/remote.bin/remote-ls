@@ -1,11 +1,23 @@
 #!/bin/sh
 ##<help>
-## ls - List registered repository names and SSH aliases as tab-separated values.
+## ls - List repo, host, user, port and optional identity path as tab-separated values.
 ## Usage: remote ls
 ## Read local target state without contacting hosts.
+## Legacy aliases have only repo and alias columns; replace them with remote edit.
 ##</help>
 set -e
+. "$REMOTE_BIN/../lib/remote.sh"
 for target in "$REMOTE_STATE"/targets/*; do
     [ -f "$target" ] || continue
-    printf '%s\t%s\n' "${target##*/}" "$(cat "$target")"
+    name=${target##*/}
+    [ ! -f "$REMOTE_STATE/connections/$name.json" ] || continue
+    remote_target_load "$target"
+    printf '%s\t%s\n' "$name" "$REMOTE_TARGET"
+done
+for target in "$REMOTE_STATE"/connections/*.json; do
+    [ -f "$target" ] || continue
+    name=${target##*/}
+    name=${name%.json}
+    remote_target_load "$target"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$REMOTE_TARGET" "$REMOTE_USER" "$REMOTE_PORT" "$REMOTE_IDENTITY"
 done

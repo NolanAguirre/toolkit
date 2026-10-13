@@ -12,3 +12,8 @@ If using a reverse proxy, forward this prefix, including WebSocket upgrades.
 
 `make build` creates dist/. Serve it beneath the same /<app-name>/ prefix;
 configure your production server's SPA fallback if adding client-side routing.
+
+Development mounts the dev inspector and proxies `/dashboard/harness-api` to
+the harness API (`HARNESS_PROXY_TARGET`, default `http://127.0.0.1:6000`).
+The inspector comes from the sibling visual-prompter component library.
+Production builds leave it out.

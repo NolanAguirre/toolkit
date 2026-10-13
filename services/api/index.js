@@ -19,7 +19,7 @@ function command(tool, args, cwd = root, { timeout = 120000, readOnly = false } 
     const child = spawn(tool, args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = '', stderr = '', failure
     const stop = (message) => {
-      failure = new ApiError(504, readOnly ? message : `${message} Inspect the repository before retrying; bootstrap may have completed some steps.`)
+      failure = new ApiError(504, readOnly ? message : `${message} Inspect state before retrying; the command may have completed some steps.`)
       try { process.kill(-child.pid, 'SIGKILL') } catch {}
     }
     const timer = setTimeout(() => stop('Toolkit command timed out.'), timeout)
@@ -136,19 +136,27 @@ async function inventory(repo, folder) {
   }))
 }
 
+async function remoteConnection(repo) {
+  const targets = await command('remote', ['ls'], root, { readOnly: true })
+  const record = targets.split('\n').map(line => line.split('\t')).find(([name]) => name === repo.name)
+  if (!record) return null
+  const [, host, user, port, identityFile] = record
+  return { host, user: user || null, port: port ? Number(port) : null, identityFile: identityFile || null, legacy: !user }
+}
+
 async function deployments(repo) {
   const releases = await entries(path.join(repo.path, '.release'))
   const files = []
   for (const filename of ['deployment/Makefile', 'deployment/root.mk', 'deployment/build', 'deployment/package', 'deployment/status']) {
     if (await regularFile(repo.path, filename)) files.push(filename)
   }
-  let remoteTarget = null, remoteError = null
+  let target = null, remoteError = null
   try {
-    const targets = await command('remote', ['ls'])
-    remoteTarget = targets.split('\n').map(line => line.split('\t')).find(([name]) => name === repo.name)?.[1] || null
+    target = await remoteConnection(repo)
   } catch (error) { remoteError = error.message }
   return {
-    files, remoteTarget, remoteError,
+    files, remoteTarget: target?.host || null, remoteConnection: target, remoteError,
+    services: (await inventory(repo, 'services')).map(service => service.name),
     releases: await Promise.all(releases.reverse().map(async release => {
       const releasePath = path.join(repo.path, '.release', release.name)
       return { name: release.name, path: releasePath, modifiedAt: (await fs.stat(releasePath)).mtime.toISOString() }
@@ -178,7 +186,9 @@ async function runningReleases(repo) {
 }
 
 function createApi() {
+  const deploying = new Set()
   return createServer(async (request, response) => {
+    let deploymentName
     const send = (status, value) => {
       response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
       response.end(JSON.stringify(value))
@@ -218,16 +228,58 @@ function createApi() {
       }
       if (parts[1] !== 'repos' || parts.length < 3 || parts.length > 4) throw new ApiError(404, 'Not found')
       const name = validName(parts[2])
+      const action = parts[3]
+      if (action === 'target' && !get && deploying.has(name)) throw new ApiError(409, 'Wait for the deployment to finish before changing its target.')
+      // Claim before registry lookup: remote deploy holds the bootstrap lock too.
+      if (action === 'deployments' && !get) {
+        if (deploying.has(name)) throw new ApiError(409, 'A deployment is already in progress for this repository.')
+        deploying.add(name)
+        deploymentName = name
+      }
       const repo = (await repositories()).find(repo => repo.name === name)
       if (!repo) throw new ApiError(404, 'Repository is not registered.')
       try { repo.path = await fs.realpath(repo.path) } catch { throw new ApiError(404, 'Registered repository directory is missing.') }
-      const action = parts[3]
       if (parts.length === 3 && get) {
         const [services, uis, databases] = await Promise.all([inventory(repo, 'services'), inventory(repo, 'ui'), inventory(repo, 'db')])
         return send(200, { repo, services, uis, databases })
       }
       if (action === 'deployments' && get) return send(200, await deployments(repo))
       if (action === 'releases' && get) return send(200, await runningReleases(repo))
+      if (action === 'target' && !get) {
+        const body = await jsonBody(request)
+        fields(body, ['host', 'connection', 'user', 'port', 'identityFile'])
+        if ((body.host === undefined) === (body.connection === undefined)) throw new ApiError(400, 'Provide either host or connection.')
+        const destination = body.host ?? body.connection
+        if (typeof destination !== 'string' || !destination || destination.length > 512 || /[\s\x00-\x1f\x7f]/.test(destination)) throw new ApiError(400, 'Provide an IP, DNS hostname, user@host or ssh://user@host:port.')
+        const options = []
+        if (body.user !== undefined) {
+          if (typeof body.user !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(body.user)) throw new ApiError(400, 'Provide a valid SSH user.')
+          options.push('--user', body.user)
+        }
+        if (body.port !== undefined) {
+          if (!Number.isInteger(body.port) || body.port < 1 || body.port > 65535) throw new ApiError(400, 'SSH port must be between 1 and 65535.')
+          options.push('--port', String(body.port))
+        }
+        if (body.identityFile !== undefined && body.identityFile !== null) options.push('--identity-file', absolutePath(body.identityFile))
+        const existing = await remoteConnection(repo)
+        await command('remote', [existing ? 'edit' : 'create', name, destination, ...options], repo.path)
+        return send(200, { target: await remoteConnection(repo) })
+      }
+      if (action === 'deployments' && !get) {
+        const body = await jsonBody(request)
+        fields(body, ['releasePath', 'service'])
+        const releasePath = absolutePath(body.releasePath)
+        const service = body.service === undefined ? null : validName(body.service, itemName)
+        try {
+          const args = ['deploy', name]
+          if (service) args.push(service)
+          args.push(releasePath)
+          const output = await command('remote', args, repo.path)
+          return send(200, { releasePath, service, output })
+        } catch (error) {
+          throw new ApiError(error.status || 500, `${error.message} Deployment may have partially completed. Check host release status before retrying; stopping the local command does not guarantee the remote operation stopped.`)
+        }
+      }
       if (!get && ['select', 'services', 'uis', 'databases'].includes(action)) {
         const body = await jsonBody(request)
         if (action === 'select') {
@@ -256,7 +308,7 @@ function createApi() {
     } catch (error) {
       if (!error.status) console.error(error)
       send(error.status || 500, { error: error.status ? error.message : 'Unable to read repository files. Check the API log.' })
-    }
+    } finally { if (deploymentName) deploying.delete(deploymentName) }
   })
 }
 

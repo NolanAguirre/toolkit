@@ -81,37 +81,74 @@ Progress/diagnostics go to stderr, and transfer failures return nonzero.
 
 ## Linux host preparation
 
-`remote` prepares service users, directories, s6 runners and supervision links on
-Linux hosts over SSH. `remote deploy` transfers a prepared release and invokes its
-shipped Makefile. The application owns package installation, DNS/nginx configuration,
-migrations, release activation, process control and health checks.
+`remote` prepares service users, directories, s6 runners and supervision links over
+SSH. Deployments use an explicit IP address or DNS hostname, SSH user, port and
+optional local identity-file path. No homelab files or SSH config entries are needed.
 
 ```sh
 toolkit build
 toolkit setup bootstrap
 toolkit setup remote
-bootstrap repo load ../homelab
-remote create homelab my-pi
+bootstrap repo load ../my-project
+remote create my-project 192.168.1.50 --user deployer
+# Equivalent connection-string forms:
+# remote create my-project deployer@example.com
+# remote create my-project ssh://deployer@example.com:2222 --identity-file /home/you/.ssh/deploy_key
 remote ls
-remote setup users homelab
-remote setup directories homelab
-remote setup service homelab --all
-remote setup supervision homelab
-remote status homelab
+remote setup all my-project
+remote status my-project
 ```
 
-`my-pi` is an existing SSH config alias. Configure its HostName, User, Port and
-IdentityFile in SSH configuration and establish its known-host entry separately.
-Commands use batch SSH, strict host-key checking and `sudo -n sh -s`; the SSH user
-needs noninteractive root access. No password or SSH private key is stored here.
-Use `remote edit homelab other-alias` to replace a target, and `remote rm homelab`
-to remove the local registration. Removing a target never changes its host.
-Repository arguments are registered bootstrap **names**, not paths.
+Accepts `user@host`, `ssh://user@host:port`, bare IP/DNS hosts with `--user`, and
+bracketed IPv6 such as `ssh://deployer@[2001:db8::1]:2222`. A user is required;
+the port defaults to 22. `--user`, `--port` and `--identity-file` override values
+from the connection string. Passwords, remote paths and arbitrary SSH options
+are not accepted. A DNS hostname must already resolve; saving a target does not
+create DNS records. IP addresses work without DNS.
+Toolkit command history skips target create/edit arguments so even rejected
+connection strings containing a password are not recorded there.
 
-Local state is `$UTIL_PATH/remote/targets/<repo>`, one SSH alias per file, plus
-lock/history directories. `toolkit setup remote` initializes this local state;
-`remote setup ...` performs host actions. Repeated initialization preserves targets.
-A target may be removed even after its bootstrap registration is removed.
+Use `remote edit my-project deployer@other.example.com` to replace the complete
+connection configuration, and `remote rm my-project` to remove the local
+registration. Both leave the host untouched. Repository arguments are registered
+bootstrap **names**, not paths. The dashboard's Deployment target form and
+`POST /api/repos/:name/target` save the same configuration.
+
+Each target is a plain JSON file at
+`$UTIL_PATH/remote/connections/<repo>.json`, created with mode 0600:
+
+```json
+{
+  "host": "example.com",
+  "user": "deployer",
+  "port": 2222,
+  "identityFile": "/home/you/.ssh/deploy_key"
+}
+```
+
+`identityFile` is a path, never the key contents; `null` uses default keys or the
+SSH agent. The shell commands use `jq` to read/write JSON, validate it before use,
+and atomically replace it under the remote lock. `remote ls` returns tab-separated
+repo, host, user, port and identity path (empty when unset). `toolkit setup remote`
+initializes local state and preserves existing settings; run it after updating.
+Existing one-line aliases in `remote/targets/<repo>` remain supported with their
+old SSH-config behavior. `remote edit` creates a JSON connection that takes
+precedence; `remote rm` removes both registrations. Legacy `remote ls` rows have
+only repo and alias columns.
+
+New connections use `ssh -F /dev/null` so neither user nor system SSH config
+changes their destination. Batch authentication, strict host-key checking and
+`sudo -n sh -s` remain in effect. Establish host trust and key access first, using
+the same explicit connection values, for example:
+
+```sh
+ssh -F /dev/null -p 2222 -i /home/you/.ssh/deploy_key deployer@example.com
+```
+
+The SSH user needs noninteractive root access for host operations. Saving settings
+makes no connection and stores no passwords or private keys. Runtime dependencies,
+builds, migrations, DNS/nginx configuration and health checks remain application
+responsibilities.
 
 ## Host prerequisites and ordering
 

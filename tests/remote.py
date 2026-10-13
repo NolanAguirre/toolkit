@@ -163,8 +163,14 @@ else: sys.exit(1)
     ssh = installed/'ssh' 
     ssh.write_text('''#!/usr/bin/env python3
 import os, pathlib, subprocess, sys
-assert sys.argv[1:] == ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', 'test-pi', 'sudo -n sh -s'], sys.argv
 root = pathlib.Path(os.environ['MOCK_HOST'])
+expected = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10']
+if '-F' in sys.argv:
+    expected += ['-F', '/dev/null', '-l', 'deployer', '-p', '2222', '-o', 'IdentitiesOnly=yes', '-i', str(root.parent/'key with spaces')]
+    expected += ['192.0.2.10', 'sudo -n sh -s']
+else:
+    expected += ['test-pi', 'sudo -n sh -s']
+assert sys.argv[1:] == expected, sys.argv
 script = sys.stdin.read()
 with (root/'ssh-calls').open('a') as log: log.write('call\\n')
 (root/'last-script').write_text(script)
@@ -205,24 +211,62 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
                     'commit', '-qm', 'test fixture'], check=True, env=env)
     checkout_commit = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
     call('bootstrap', 'repo', 'load', str(repo))
-    remote('create', 'demo', 'test-pi')
-    assert remote('ls') == 'demo\ttest-pi'
-    target = root/'state/remote/targets/demo'
+    key = root/'key with spaces'
+    key.write_text('fixture key path only')
+    # Dispatcher history runs before validation; target input must never be logged.
+    (installed/'encrypt').unlink()
+    (installed/'encrypt').write_text('#!/bin/sh\ntouch "$UTIL_PATH/history-called"\ncat\n')
+    (installed/'encrypt').chmod(0o755)
+    remote('create', 'demo', 'user:password@host', ok=False, extra={'TOOLKIT_HIST_LOCK': ''})
+    remote('create', 'demo', '192.0.2.10', '--user', 'deployer', '--port', '2222', '--identity-file', str(key), extra={'TOOLKIT_HIST_LOCK': ''})
+    assert not (root/'state/history-called').exists()
+    target = root/'state/remote/connections/demo.json'
+    expected = {'host': '192.0.2.10', 'user': 'deployer', 'port': 2222, 'identityFile': str(key)}
+    assert json.loads(target.read_text()) == expected
     assert target.stat().st_mode & 0o777 == 0o600
     call('remote.bin/setup')
-    assert target.read_text() == 'test-pi\n'
-    remote('edit', 'demo', 'changed', ok=False, extra={'FAIL_LOCAL_SYNC': '1'})
-    assert target.read_text() == 'test-pi\n'
+    assert json.loads(target.read_text()) == expected
+    remote('edit', 'demo', 'user@changed.example', ok=False, extra={'FAIL_LOCAL_SYNC': '1'})
+    assert json.loads(target.read_text()) == expected
     assert not list(target.parent.glob('.atomic-write.*'))
-    remote('create', 'demo', 'test-pi', ok=False)
-    remote('edit', 'demo', '-oProxyCommand=bad', ok=False)
-    remote('edit', 'demo', 'x\ntrue', ok=False)
+    remote('create', 'demo', 'deployer@192.0.2.10', ok=False)
+    for connection in ('-oProxyCommand=bad', 'x\ntrue', 'user:password@host', 'ssh://user@host/path', 'user@host:0', 'user@host:65536', 'user@host:bad', 'user@@host'):
+        remote('edit', 'demo', connection, ok=False)
+    remote('edit', 'demo', 'host', ok=False)  # Explicit user is required.
+    remote('edit', 'demo', 'user@host', '--identity-file', 'relative', ok=False)
+    remote('edit', 'demo', 'user@host', '--identity-file', '/tmp/key\nother', ok=False)
+    remote('edit', 'demo', 'user@host', '--port', '22x', ok=False)
+    remote('edit', 'demo', 'user@host', '--unknown', 'value', ok=False)
+    remote('edit', 'demo', 'user@host', '--user', ok=False)
+    assert json.loads(target.read_text()) == expected
+    remote('edit', 'demo', 'ssh://alice@[2001:db8::1]:2200')
+    assert json.loads(target.read_text()) == {'host': '2001:db8::1', 'user': 'alice', 'port': 2200, 'identityFile': None}
+    remote('edit', 'demo', 'bob@example.com')
+    assert json.loads(target.read_text()) == {'host': 'example.com', 'user': 'bob', 'port': 22, 'identityFile': None}
+    remote('edit', 'demo', 'ssh://alice@example.com:2200', '--user', 'bob', '--port', '2222')
+    assert json.loads(target.read_text())['user'] == 'bob'
+    assert json.loads(target.read_text())['port'] == 2222
+    # Invalid JSON is never treated as an SSH alias, and rejects control characters.
+    target.write_text('123')
+    remote('ls', ok=False)
+    target.write_text(json.dumps(dict(expected, host='host\n')))
+    remote('ls', ok=False)
+    # Legacy aliases still work, and explicit edits migrate without losing them on failure.
+    remote('rm', 'demo')
+    legacy = root/'state/remote/targets/demo'
+    legacy.write_text('test-pi\n')
+    assert remote('ls') == 'demo\ttest-pi'
+    remote('edit', 'demo', 'user@changed.example', ok=False, extra={'FAIL_LOCAL_SYNC': '1'})
+    assert legacy.read_text() == 'test-pi\n'
     remote('setup', 'all', 'demo', 'extra', ok=False)
     remote('setup', 'service', 'demo', 'missing', ok=False)
     remote('deploy', 'demo', ok=False)
     assert not (host/'ssh-calls').exists()
     remote('setup', 'directories', 'demo', ok=False)
     assert not (host/'var/service-dir').exists()
+    remote('edit', 'demo', 'ssh://deployer@192.0.2.10:2222', '--identity-file', str(key))
+    assert json.loads(target.read_text()) == expected
+    assert remote('ls') == f'demo\t192.0.2.10\tdeployer\t2222\t{key}'
     remote('setup', 'users', 'demo')
     users_before = (host/'users.json').read_bytes()
     remote('setup', 'users', 'demo')
@@ -496,10 +540,10 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     lock = root/'state/remote/lock'
     inode = lock.stat().st_ino
     def create():
-        return subprocess.run([str(installed/'remote'), 'create', 'demo', 'test-pi'],
+        return subprocess.run([str(installed/'remote'), 'create', 'demo', 'user@example.com'],
                               env=env, capture_output=True, timeout=30).returncode
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(lambda _: create(), range(2))) == [0, 1]
     assert lock.stat().st_ino == inode
-    assert target.read_text() == 'test-pi\n'
+    assert json.loads(target.read_text()) == {'host': 'example.com', 'user': 'user', 'port': 22, 'identityFile': None}
     print('remote: local validation, host setup/status, preservation, failures and concurrency passed')

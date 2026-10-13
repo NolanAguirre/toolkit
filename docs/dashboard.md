@@ -9,11 +9,18 @@ make install
 make start
 ```
 
-Open <http://localhost:6701/dashboard/>. Requires `envdir`, Node.js matching
+Open <http://localhost:6701/dashboard/>. In development the page includes the
+dev inspector (hold Alt, or latch Dev in the corner panel). Its harness form and
+session list call `/dashboard/harness-api`, which Vite proxies to the harness
+API. `HARNESS_PROXY_TARGET` overrides the default `http://127.0.0.1:6000`.
+The inspector is omitted from production builds. Development reads it from
+the sibling `visual-prompter/component-library`.
+
+Requires `envdir`, Node.js matching
 `ui/dashboard/package.json`, and installed, initialized `bootstrap` and `port`
 commands on PATH. Keep the installed toolkit up to date with this checkout.
-`UTIL_PATH` selects toolkit state (normally `$HOME/.cerberus`). `remote` is optional
-for displaying the registered remote target.
+`UTIL_PATH` selects toolkit state (normally `$HOME/.cerberus`). Install and initialize
+`remote` for deployment and host inspection. Target configuration also requires `jq`.
 
 `make start` uses `env-dir/$ENV_USER`, falling back to `env-dir/$USER`, and logs
 in each directory's `start.log`. For foreground development, run
@@ -40,8 +47,26 @@ to the API environment's HOST/PORT; `API_URL` overrides its target.
   The SSH target comes from local `remote ls` state. **Check host via SSH** reads
   the selected release and verifies the running release against s6 process state.
   It displays commit/archive hashes when recorded, and explicit unknown/error
-  states otherwise. No deployment scripts, restarts or application health checks
-  run. Local packages alone are not evidence of an active deployment.
+  states otherwise. This check does not deploy or restart services.
+  Local packages alone are not evidence of an active deployment.
+- Save a deployment target in the Deployments tab using an IP address, DNS
+  hostname, `user@host` or `ssh://user@host:port`. Supply an SSH user for bare hosts;
+  optionally override the port or provide an absolute SSH key path on the API
+  machine. Settings are stored in `$UTIL_PATH/remote/connections/<repo>.json`;
+  no SSH config entry or homelab configuration is required. Saving only changes
+  local JSON, never contacts the host or creates DNS records. Existing aliases
+  remain usable until replaced. Unsaved target changes disable host checks and
+  deployment so they cannot accidentally use the previously saved destination.
+- Deploy a prepared release directory from the Deployments tab. Choose all
+  services (a bundle containing `<service>/run` for every service), or one
+  service (its directory containing `run` directly). Local `.release/` paths
+  are suggested; any absolute artifact directory accessible to the API is accepted.
+  The API invokes `remote deploy` against the repo's registered target, then the
+  UI checks host status even after a failure. Prepare the host with
+  `remote setup all <repo>` first. This uploads artifacts, selects releases and requests s6
+  restarts; services marked down stay down. It does not build, run migrations,
+  or check application health. UI assets must be packaged in their serving service.
+  See [artifact layout and host setup](remote.md#release-artifacts-and-identities).
 
 The service uses fixed CLI executables and argument arrays without a shell.
 Bootstrap owns validation, state updates, port allocation and locks. Repo-scoped
@@ -66,7 +91,9 @@ All payloads and responses are JSON. Names in URL paths identify registered repo
 | POST | `/api/repos/:name/services` | `{ name, support: [] }`; `http`, `fs`, `db` |
 | POST | `/api/repos/:name/uis` | `{ name, support: [] }`; `component-library` |
 | POST | `/api/repos/:name/databases` | `{ name, support: ["sqlite"] }` or `["postgres"]` |
-| GET | `/api/repos/:name/deployments` | Local `files`, `releases`, `remoteTarget`, `remoteError` |
+| GET | `/api/repos/:name/deployments` | Local `files`, `releases`, service names in `services`, `remoteTarget`, `remoteConnection`, `remoteError` |
+| POST | `/api/repos/:name/target` | `{ host, user, port?, identityFile? }` or `{ connection, user?, port?, identityFile? }`; returns `{ target }` |
+| POST | `/api/repos/:name/deployments` | `{ releasePath, service? }`; absolute artifact directory; returns `{ releasePath, service, output }` |
 | GET | `/api/repos/:name/releases` | SSH check: `{ checkedAt, services, error }`; service `runtime`, `selected`, `running` fields |
 
 `support` defaults to an empty list except databases, which require one backend.
@@ -77,6 +104,12 @@ Errors return `{ error }`: 400 for invalid input, 403 for origin/header rejectio
 executables, and 504 for command timeout/output limits. Commands are limited to
 120 seconds and 1 MiB per output stream; timeout terminates the command process
 group. Bodies are limited to 16 KiB. Partial CLI work is retained for inspection.
+Deployments return HTTP 200 after the command completes, not after application
+health verification. Omit `service` to deploy all services. Concurrent deployments
+of the same repo through this API instance return 409; the remote CLI also holds
+its local and host locks. A failed deployment may have activated some services;
+check `/api/repos/:name/releases` before retrying. Terminating the local SSH client
+on timeout does not guarantee the host operation stopped.
 
 Mutations require `Content-Type: application/json` and `X-Toolkit-Request: 1`.
 The browser supplies both. For example, to add a UI to a registered repo:
@@ -86,6 +119,31 @@ curl --fail-with-body http://localhost:6700/api/repos/my-repo/uis \
   -H 'Content-Type: application/json' \
   -H 'X-Toolkit-Request: 1' \
   -d '{"name":"dashboard"}'
+```
+
+To save a target (creates or replaces its complete configuration):
+
+```sh
+curl --fail-with-body http://localhost:6700/api/repos/my-repo/target \
+  -H 'Content-Type: application/json' \
+  -H 'X-Toolkit-Request: 1' \
+  -d '{"connection":"ssh://deployer@example.com:2222","identityFile":"/home/you/.ssh/deploy_key"}'
+```
+
+Use either `host` or `connection`. Explicit `user` and numeric `port` override
+connection-string values. Port defaults to 22 and omitted/null `identityFile`
+uses default keys or the SSH agent. Returned target fields are `host`, `user`,
+`port`, `identityFile` and `legacy` (true only for old alias registrations).
+Target updates during an active deployment through this API instance return 409.
+
+To deploy a prepared bundle (add `"service":"api"` and point `releasePath` to
+that service's artifact directory for a single-service deployment):
+
+```sh
+curl --fail-with-body http://localhost:6700/api/repos/my-repo/deployments \
+  -H 'Content-Type: application/json' \
+  -H 'X-Toolkit-Request: 1' \
+  -d '{"releasePath":"/home/you/projects/my-repo/.release/build-001"}'
 ```
 
 The API binds only to loopback and requires a loopback Host header. Browser

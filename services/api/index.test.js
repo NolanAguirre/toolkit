@@ -127,6 +127,107 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     assert.equal((await fetch(`${url}/api/repos`, { method: 'DELETE' })).status, 405)
   })
 
+  await t.test('saves direct hosts and SSH connection strings as JSON without contacting hosts', async () => {
+    writeFileSync(path.join(installed, 'ssh'), '#!/bin/sh\ntouch "$UTIL_PATH/unexpected-ssh"\nexit 1\n', { mode: 0o755 })
+    const config = path.join(process.env.UTIL_PATH, 'remote/connections/example.json')
+    let response = await post('/api/repos/example/target', { host: '192.0.2.20', user: 'deployer' })
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
+    assert.deepEqual((await response.json()).target, { host: '192.0.2.20', user: 'deployer', port: 22, identityFile: null, legacy: false })
+    assert.deepEqual(JSON.parse(readFileSync(config, 'utf8')), { host: '192.0.2.20', user: 'deployer', port: 22, identityFile: null })
+    response = await post('/api/repos/example/target', { connection: 'ssh://alice@[2001:db8::1]:2200', identityFile: '/tmp/key with spaces' })
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
+    assert.deepEqual((await response.json()).target, { host: '2001:db8::1', user: 'alice', port: 2200, identityFile: '/tmp/key with spaces', legacy: false })
+    const unchanged = readFileSync(config, 'utf8')
+    for (const body of [{}, { host: 'host', connection: 'user@host' }, { host: '\n' }, { connection: 'user@host', port: 65536 }, { connection: 'user@host', port: '22' }, { connection: 'user@host', user: '-root' }, { connection: 'user@host', identityFile: 'relative' }, { connection: 'user@host', password: 'never-store' }]) {
+      assert.equal((await post('/api/repos/example/target', body)).status, 400)
+    }
+    for (const connection of ['user:password@host', 'ssh://user@host/path', 'user@host:bad', 'host']) {
+      assert.equal((await post('/api/repos/example/target', { connection })).status, 422)
+    }
+    assert.equal(readFileSync(config, 'utf8'), unchanged)
+    assert.equal((await fetch(`${url}/api/repos/example/target`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"connection":"user@host"}' })).status, 403)
+    response = await post('/api/repos/example/target', { connection: 'deployer@test-host' })
+    assert.equal(response.status, 200)
+    const inventory = await (await get('/api/repos/example/deployments')).json()
+    assert.equal(inventory.remoteTarget, 'test-host')
+    assert.deepEqual(inventory.remoteConnection, { host: 'test-host', user: 'deployer', port: 22, identityFile: null, legacy: false })
+    assert.equal(existsSync(path.join(process.env.UTIL_PATH, 'unexpected-ssh')), false)
+  })
+
+  await t.test('deploys bundles and individual services through the real remote command', async () => {
+    const releasePath = path.join(directory, 'prepared release;literal')
+    for (const service of ['api', 'nginx', 'worker']) {
+      mkdirSync(path.join(releasePath, service), { recursive: true })
+      writeFileSync(path.join(releasePath, service, 'run'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    }
+    writeFileSync(path.join(process.env.UTIL_PATH, 'remote/targets/example'), 'test-host\n')
+    const ssh = path.join(installed, 'ssh')
+    const capture = path.join(process.env.UTIL_PATH, 'ssh-payload')
+    const sshSuccess = '#!/bin/sh\nprintf "%s\\n" "$@" > "$UTIL_PATH/ssh-args"\ncat > "$UTIL_PATH/ssh-payload"\nprintf "deployed\\n"\n'
+    writeFileSync(ssh, sshSuccess, { mode: 0o755 })
+    // Global selection must not choose the deployment destination.
+    await post('/api/repos/imported/select', {})
+    const deployed = await post('/api/repos/example/deployments', { releasePath })
+    assert.equal(deployed.status, 200, JSON.stringify(await deployed.clone().json()))
+    assert.deepEqual(await deployed.json(), { releasePath, service: null, output: 'deployed' })
+    assert.match(readFileSync(path.join(process.env.UTIL_PATH, 'ssh-args'), 'utf8'), /StrictHostKeyChecking=yes\n-o\nConnectTimeout=10\n-F\n\/dev\/null\n-l\ndeployer\n-p\n22\ntest-host\nsudo -n sh -s/)
+    const payload = readFileSync(capture, 'utf8')
+    assert.match(payload, /repo='example'/)
+    const archive = path.join(directory, 'bundle.tar.gz')
+    writeFileSync(archive, Buffer.from(payload.split("<<'TOOLKIT_RELEASE_ARCHIVE'\n")[1].split('\nTOOLKIT_RELEASE_ARCHIVE')[0], 'base64'))
+    assert.deepEqual(execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n'), ['api.tar.gz', 'api.release', 'nginx.tar.gz', 'nginx.release', 'worker.tar.gz', 'worker.release'])
+    const single = await post('/api/repos/example/deployments', { releasePath: path.join(releasePath, 'api'), service: 'api' })
+    assert.equal(single.status, 200)
+    assert.equal((await single.json()).service, 'api')
+    assert.match(readFileSync(capture, 'utf8'), /set -- 'api:[0-9]+'\n/)
+    assert.deepEqual((await (await get('/api/repos/example/deployments')).json()).services, ['api', 'nginx', 'worker'])
+
+    rmSync(capture)
+    for (const body of [{}, { releasePath: '.' }, { releasePath: '/tmp\n' }, { releasePath, service: '../api' }, { releasePath, service: null }, { releasePath, target: 'other-host' }]) {
+      assert.equal((await post('/api/repos/example/deployments', body)).status, 400)
+    }
+    assert.equal((await post('/api/repos/not-registered/deployments', { releasePath })).status, 404)
+    assert.equal((await fetch(`${url}/api/repos/example/deployments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ releasePath }) })).status, 403)
+    assert.equal((await fetch(`${url}/api/repos/example/deployments`, { method: 'POST', headers: { ...headers, Origin: 'https://example.com' }, body: JSON.stringify({ releasePath }) })).status, 403)
+    assert.equal((await post('/api/repos/imported/deployments', { releasePath })).status, 422)
+    assert.equal((await post('/api/repos/example/deployments', { releasePath, service: 'unknown' })).status, 422)
+    assert.equal((await post('/api/repos/example/deployments', { releasePath: path.join(directory, 'missing') })).status, 422)
+    const linked = path.join(directory, 'linked-release')
+    symlinkSync(releasePath, linked)
+    assert.equal((await post('/api/repos/example/deployments', { releasePath: linked })).status, 422)
+    chmodSync(path.join(releasePath, 'worker/run'), 0o644)
+    const malformed = await post('/api/repos/example/deployments', { releasePath })
+    assert.equal(malformed.status, 422)
+    assert.match((await malformed.json()).error, /executable run/)
+    assert.equal(existsSync(capture), false, 'invalid requests must not reach SSH')
+    chmodSync(path.join(releasePath, 'worker/run'), 0o755)
+
+    writeFileSync(ssh, '#!/bin/sh\ncat > /dev/null\necho "SSH connection failed" >&2\nexit 255\n')
+    const failed = await post('/api/repos/example/deployments', { releasePath })
+    assert.equal(failed.status, 422)
+    assert.match((await failed.json()).error, /SSH connection failed.*partially completed/)
+
+    // Hold SSH after remote has acquired the bootstrap lock. A second POST must
+    // reject immediately instead of waiting on repo ls and deploying again later.
+    const entered = path.join(process.env.UTIL_PATH, 'ssh-entered')
+    const release = path.join(process.env.UTIL_PATH, 'ssh-release')
+    writeFileSync(ssh, '#!/bin/sh\ncat > /dev/null\ntouch "$UTIL_PATH/ssh-entered"\nwhile [ ! -f "$UTIL_PATH/ssh-release" ]; do sleep 0.05; done\necho deployed\n')
+    const pending = post('/api/repos/example/deployments', { releasePath })
+    try {
+      for (let attempt = 0; attempt < 100 && !existsSync(entered); attempt++) await new Promise(resolve => setTimeout(resolve, 50))
+      assert.ok(existsSync(entered), 'deployment reached SSH')
+      const duplicate = await fetch(`${url}/api/repos/example/deployments`, { method: 'POST', headers, body: JSON.stringify({ releasePath }), signal: AbortSignal.timeout(2000) })
+      assert.equal(duplicate.status, 409)
+      const retarget = await fetch(`${url}/api/repos/example/target`, { method: 'POST', headers, body: JSON.stringify({ connection: 'user@other-host' }), signal: AbortSignal.timeout(2000) })
+      assert.equal(retarget.status, 409)
+    } finally {
+      writeFileSync(release, '')
+      assert.equal((await pending).status, 200)
+    }
+    writeFileSync(ssh, sshSuccess)
+    assert.equal((await post('/api/repos/example/deployments', { releasePath })).status, 200, 'deployment slot is released after completion')
+  })
+
   await t.test('deployment inventory is local and ignores external symlink data', async () => {
     mkdirSync(path.join(repoPath, '.release/20261012T010000Z'), { recursive: true })
     mkdirSync(path.join(repoPath, 'deployment'))

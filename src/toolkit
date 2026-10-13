@@ -29,6 +29,14 @@ record_history() (
         return 0
     fi
 
+    # Connection strings may accidentally include a password even when validation
+    # rejects them. Do not record target configuration arguments before validation.
+    case "$TOOLKIT:$ACTION" in
+        remote:create|remote:edit)
+            return 0
+            ;;
+    esac
+
     if ! command -v encrypt >/dev/null 2>&1; then
         return 0
     fi

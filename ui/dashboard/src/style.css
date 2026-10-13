@@ -82,6 +82,9 @@ main > .error { margin-bottom: 20px; border: 1px solid #eacfc9; border-radius: 8
 .deployment-summary { display: flex; gap: 50px; padding: 0 28px 18px; }
 .deployment-summary p { font-size: 14px; }
 .deployment-files { border-top: 1px solid #e8ede7; padding: 22px 28px; }
+.deploy-form { border-top: 1px solid #e8ede7; padding: 22px 28px; }
+.deploy-form > .hint { margin-top: 16px; }
+.deploy-output { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; }
 h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 .deployment-files ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; font-size: 12px; }
 .notice { margin: 0; padding: 18px 28px; color: #62706a; background: #f8faf7; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -98,3 +101,6 @@ h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 .release-identity dd { margin: 0; overflow-wrap: anywhere; }
 .release-identity .hint { margin-top: 16px; }
 @media (max-width: 480px) { .release-identity dl { grid-template-columns: 1fr; gap: 6px; } .release-identity dd { margin-bottom: 10px; } }
+.dev-inspector button { font-family: inherit; }
+.dev-inspector button:disabled { cursor: not-allowed; }
+.dev-inspector__action { font-size: 0.75rem; font-weight: 400; }
