@@ -268,7 +268,6 @@ export default function App() {
   const repo = repos.find(repo => repo.name === selected)
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
     <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><span className="local">Local workspace</span></header></DevScope>
-    <DevScope id="h6c1v5b"><section className="intro"><div><p className="eyebrow">WORKSPACE</p><h1>Build from here.</h1><p>Scaffold your next service. Keep every repository in view.</p></div></section></DevScope>
     {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
     {error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
     {form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />}

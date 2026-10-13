@@ -6,10 +6,7 @@ header { display: flex; justify-content: space-between; align-items: center; hei
 .brand { display: flex; align-items: center; gap: 12px; font: 700 24px ui-monospace, monospace; color: #21634f; text-decoration: none; }
 .brand span { font: 650 19px system-ui, sans-serif; color: #202a29; }
 .local { font-size: 13px; color: #4f6259; }
-.intro { padding: 60px 0 34px; }
 .eyebrow { font-size: 11px; letter-spacing: .16em; font-weight: 700; color: #416657; }
-h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 550; letter-spacing: -.045em; margin: 14px 0; }
-.intro > p:last-child { color: #62706a; line-height: 1.6; }
 .panel { border: 1px solid #dce2da; border-radius: 12px; background: #fff; overflow: hidden; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 25px 28px; gap: 20px; }
 h2 { font-size: 18px; margin: 0 0 6px; font-weight: 600; }
@@ -30,10 +27,12 @@ td { font-size: 14px; }
 .error, .empty { margin: 0; padding: 24px 28px; border-top: 1px solid #e8ede7; }
 .error { color: #923a34; background: #fff6f3; }
 footer { display: flex; justify-content: space-between; gap: 16px; color: #718075; font-size: 12px; padding: 28px 0; }
-@media (max-width: 640px) { main { padding: 0 18px; } header { height: 76px; } .intro { padding-top: 36px; } .panel-heading, th, td { padding: 18px; } footer { flex-direction: column; } }
+@media (max-width: 640px) { main { padding: 0 18px; } header { height: 76px; } .panel-heading, th, td { padding: 18px; } footer { flex-direction: column; } }
 main { max-width: 1320px; }
-.intro { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding-top: 40px; }
-.intro p:not(.eyebrow) { color: #62706a; line-height: 1.6; }
+header + .workspace,
+header + .success,
+header + .error,
+header + .form-panel { margin-top: 28px; }
 .primary { color: white; background: #286449; border-color: #286449; }
 .primary:hover { background: #1d4f38; }
 .workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 32px; align-items: start; }
