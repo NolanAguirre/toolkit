@@ -544,7 +544,8 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     assert not (worker/'env/PORT').exists()
     assert (worker/'run').is_file()
     assert (host/'var/service/demo-api-consumer').resolve() == worker
-    assert 'api-consumer\t' in remote('status', 'demo')
+    # The earlier preservation test deliberately left the deployed API down.
+    assert 'api-consumer\t' in remote('status', 'demo', ok=False)
     assert 'api-consumer\t' in remote('releases', 'demo')
     assert not (repo/'services/api-consumer').exists()
     worker_artifact = release/'api-consumer'

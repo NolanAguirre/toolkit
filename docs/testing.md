@@ -5,6 +5,11 @@ preferred/fallback ports, retained reservations, user environment overrides,
 preservation of application configuration, invalid paths, allocation failures,
 cleanup, and concurrent additions. It uses temporary installations and state.
 
+Run `python3 tests/bootstrap-services.py` for Node/Python scaffolding, separate
+API/consumer deployment declarations, foreground launchers, inherited runtime
+environments and preservation of existing services. npm and runtimes are stubbed;
+no dependencies are installed.
+
 Run `python3 tests/bootstrap.py` for isolated repository import checks, including
 existing named and legacy reservations, conflicts, concurrent imports, and adding
 a service afterward. The test uses disposable installed commands and state, with
@@ -45,7 +50,9 @@ It requires npm but does not install packages or alter a real component library.
 Run `python3 tests/remote.py` for remote setup/status checks. SSH and privileged
 host tools are mocked; generated POSIX shell runs against temporary paths. The
 suite verifies local registrations, prerequisites, per-service/all setup, ports,
-repeat setup, data preservation, failures and concurrent independent clients. No
+repeat setup, data preservation, failures and concurrent independent clients. It also
+checks multiple deployment services from one source folder, independent consumer
+deployment, bundle validation, port selection and duplicate declarations. No
 real remote host is contacted. See [remote.md](remote.md) for host requirements.
 
 Run `python3 tests/remote-sync.py` for directory-copy profiles and real SFTP

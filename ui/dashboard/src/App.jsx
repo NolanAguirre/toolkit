@@ -27,6 +27,13 @@ const options = {
   services: [['http', 'HTTP port'], ['fs', 'Filesystem storage'], ['db', 'Same-name database']],
   uis: [['component-library', 'Existing component library']],
 }
+const optionDevIds = {
+  nginx: 'a2k9m4p',
+  http: 'v7c1n8d',
+  fs: 'q4w6h2j',
+  db: 'e8r3t5y',
+  'component-library': 'u1i6o9s',
+}
 const labels = { create: 'New repository', import: 'Import repository', services: 'Add Node.js service', uis: 'Add React UI', databases: 'Add database' }
 
 function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose }) {
@@ -56,17 +63,17 @@ function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose
   }
 
   return <DevScope id="s5d2f6g" state={{ kind, busy, created, error: Boolean(error) }}><form className="inline-form" onSubmit={submit} aria-labelledby="form-title">
-    <div className="inline-form-heading"><h3 id="form-title">{labels[kind]}</h3><button type="button" disabled={busy} onClick={onClose}>Cancel</button></div>
+    <DevScope id="m4c8v2b"><div className="inline-form-heading"><h3 id="form-title">{labels[kind]}</h3><DevScope id="x4b7n2k"><button type="button" disabled={busy} onClick={onClose}>Cancel</button></DevScope></div></DevScope>
     <fieldset disabled={busy || created}>
-        {kind !== 'import' && <label>Name<input required autoFocus value={name} onChange={event => setName(event.target.value)} pattern={pattern} maxLength={kind === 'databases' ? 63 : 128} placeholder={kind === 'create' ? 'my-project' : kind === 'services' ? 'api' : kind === 'uis' ? 'dashboard' : 'app'} /></label>}
-        {['create', 'import'].includes(kind) && <label>{kind === 'create' ? 'Parent directory' : 'Existing repository path'}<input required autoFocus={kind === 'import'} value={directory} onChange={event => setDirectory(event.target.value)} placeholder="/home/you/projects/my-project" pattern="/.*" /><span className="hint">{kind === 'create' ? `Creates a new directory${name ? ` named ${name}` : ''} here using your shared ~/.s6craft rules.` : 'Must contain a services/ directory. Existing files are preserved; ports are discovered and registered.'}</span></label>}
-        {kind === 'databases' && <label>Database backend<select value={engine} onChange={event => setEngine(event.target.value)}><option value="sqlite">SQLite</option><option value="postgres">PostgreSQL</option></select><span className="hint">Creates a Sqitch scaffold and registers it. Does not run migrations.</span></label>}
-        {options[kind] && <div className="options">{options[kind].map(([value, label]) => <label className="checkbox" key={value}><input type="checkbox" checked={support.includes(value)} onChange={event => setSupport(event.target.checked ? [...support, value] : support.filter(option => option !== value))} />{label}</label>)}</div>}
-        {kind === 'services' && <p className="hint">Creates the Node.js package and environment files. Add application code before starting it. Database support requires a database with this service’s name.</p>}
-        {kind === 'uis' && <p className="hint">Creates a React/Vite app. Component library support requires component-library/ in this repo. Install dependencies after scaffolding.</p>}
-        <button className="primary" type="submit">{busy ? 'Working…' : labels[kind]}</button>
+        {kind !== 'import' && <DevScope id="w6n1q9e"><label>Name<input required autoFocus value={name} onChange={event => setName(event.target.value)} pattern={pattern} maxLength={kind === 'databases' ? 63 : 128} placeholder={kind === 'create' ? 'my-project' : kind === 'services' ? 'api' : kind === 'uis' ? 'dashboard' : 'app'} /></label></DevScope>}
+        {['create', 'import'].includes(kind) && <DevScope id="b3h7d5k" state={{ kind }}><label>{kind === 'create' ? 'Parent directory' : 'Existing repository path'}<input required autoFocus={kind === 'import'} value={directory} onChange={event => setDirectory(event.target.value)} placeholder="/home/you/projects/my-project" pattern="/.*" /><span className="hint">{kind === 'create' ? `Creates a new directory${name ? ` named ${name}` : ''} here using your shared ~/.s6craft rules.` : 'Must contain a services/ directory. Existing files are preserved; ports are discovered and registered.'}</span></label></DevScope>}
+        {kind === 'databases' && <DevScope id="y2p6s8f" state={{ engine }}><label>Database backend<select value={engine} onChange={event => setEngine(event.target.value)}><option value="sqlite">SQLite</option><option value="postgres">PostgreSQL</option></select><span className="hint">Creates a Sqitch scaffold and registers it. Does not run migrations.</span></label></DevScope>}
+        {options[kind] && <DevScope id="c9a4t1r" state={{ kind }}><div className="options">{options[kind].map(([value, label]) => <DevScope id={optionDevIds[value]} key={value}><label className="checkbox"><input type="checkbox" checked={support.includes(value)} onChange={event => setSupport(event.target.checked ? [...support, value] : support.filter(option => option !== value))} />{label}</label></DevScope>)}</div></DevScope>}
+        {kind === 'services' && <DevScope id="g7k2m5x"><p className="hint">Creates the Node.js package and environment files. Add application code before starting it. Database support requires a database with this service’s name.</p></DevScope>}
+        {kind === 'uis' && <DevScope id="d1v8n3q"><p className="hint">Creates a React/Vite app. Component library support requires component-library/ in this repo. Install dependencies after scaffolding.</p></DevScope>}
+        <DevScope id="o5j9w4c"><button className="primary" type="submit">{busy ? 'Working…' : labels[kind]}</button></DevScope>
     </fieldset>
-    {error && <div className="form-error" role="alert"><p>{error}</p><span className="hint">Check the repository before retrying if bootstrap reports partial work.</span></div>}
+    {error && <DevScope id="i8l3e6u"><div className="form-error" role="alert"><p>{error}</p><span className="hint">Check the repository before retrying if bootstrap reports partial work.</span></div></DevScope>}
   </form></DevScope>
 }
 
