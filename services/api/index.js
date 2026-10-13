@@ -3,6 +3,7 @@ const { readFileSync } = require('node:fs')
 const fs = require('node:fs/promises')
 const { createServer } = require('node:http')
 const path = require('node:path')
+const { userInfo } = require('node:os')
 
 const root = path.resolve(__dirname, '../..')
 const env = (name) => process.env[name] || readFileSync(path.join(__dirname, 'env-dir/default', name), 'utf8').trim()
@@ -73,6 +74,14 @@ function supportOptions(value = [], allowed) {
     throw new ApiError(400, `Supported options: ${allowed.join(', ') || 'none'}.`)
   }
   return value.map(option => `--support=${option}`)
+}
+
+const serviceTypes = async () => {
+  const output = await command('bootstrap', ['service', 'type', 'ls'], root, { readOnly: true })
+  return Object.fromEntries(output.split('\n').slice(1).filter(Boolean).map(line => {
+    const [type, label, options, required, hint] = line.split('\t')
+    return [type, { label, options: options === '-' ? [] : options.split(','), required: required === '-' ? [] : required.split(','), hint }]
+  }))
 }
 
 async function jsonBody(request) {
@@ -156,11 +165,12 @@ async function deployments(repo) {
   } catch (error) { remoteError = error.message }
   return {
     files, remoteTarget: target?.host || null, remoteConnection: target, remoteError,
+    remoteDefaults: { user: userInfo().username, port: 22 },
     services: (await inventory(repo, 'services')).map(service => service.name),
-    releases: await Promise.all(releases.reverse().map(async release => {
+    releases: (await Promise.all(releases.map(async release => {
       const releasePath = path.join(repo.path, '.release', release.name)
       return { name: release.name, path: releasePath, modifiedAt: (await fs.stat(releasePath)).mtime.toISOString() }
-    })),
+    }))).sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt) || b.name.localeCompare(a.name)),
   }
 }
 
@@ -210,7 +220,7 @@ function createApi() {
       }
       const get = request.method === 'GET'
       if (pathname === '/api/health' && get) return send(200, { status: 'ok' })
-      if (pathname === '/api/config' && get) return send(200, { parentPath: path.dirname(root) })
+      if (pathname === '/api/config' && get) return send(200, { parentPath: path.dirname(root), serviceTypes: await serviceTypes() })
       if (pathname === '/api/repos' && get) return send(200, { repos: await repositories() })
       if (pathname === '/api/repos' && !get) {
         const body = await jsonBody(request)
@@ -286,7 +296,7 @@ function createApi() {
           fields(body, [])
           return send(200, { path: await command('bootstrap', ['repo', 'load', repo.path]) })
         }
-        fields(body, ['name', 'support'])
+        fields(body, action === 'services' ? ['name', 'type', 'support'] : ['name', 'support'])
         const folder = { services: 'services', uis: 'ui', databases: 'db' }[action]
         try {
           if (!(await fs.lstat(path.join(repo.path, folder))).isDirectory()) throw new ApiError(422, `${folder}/ must be a real directory, not a symlink.`)
@@ -294,7 +304,17 @@ function createApi() {
           if (error.code !== 'ENOENT') throw error
         }
         let args
-        if (action === 'services') args = ['service', 'add', validName(body.name, itemName), '--type=nodejs', ...supportOptions(body.support, ['http', 'fs', 'db'])]
+        if (action === 'services') {
+          const type = body.type === undefined ? 'nodejs' : body.type
+          const types = await serviceTypes()
+          if (typeof type !== 'string' || !Object.hasOwn(types, type)) throw new ApiError(400, `Choose a service type: ${Object.keys(types).join(' or ')}.`)
+          const config = types[type]
+          const options = supportOptions(body.support, config.options)
+          for (const required of config.required) {
+            if (!options.includes(`--support=${required}`)) options.push(`--support=${required}`)
+          }
+          args = ['service', 'add', validName(body.name, itemName), `--type=${type}`, ...options]
+        }
         if (action === 'uis') args = ['ui', 'add', validName(body.name, itemName), ...supportOptions(body.support, ['component-library'])]
         if (action === 'databases') {
           validName(body.name, /^[a-z][a-z0-9_]{0,62}$/)

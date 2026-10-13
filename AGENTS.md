@@ -2,6 +2,9 @@
 
 These rules apply throughout this repository.
 
+Also read [shared repository instructions](AGENTS.shared.md). The toolkit-specific
+conventions below remain in effect.
+
 ## Purpose and implementation
 
 - Toolkits are small, easy-to-read Bourne shell scripts for managing configuration

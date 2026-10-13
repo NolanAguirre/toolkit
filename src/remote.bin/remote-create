@@ -3,7 +3,7 @@
 ## create - Create the SSH target for a bootstrap repository.
 ## Usage: remote create <repo> <host-or-connection> [--user user] [--port port] [--identity-file path]
 ## Accept IP/DNS hosts, user@host and ssh://user@host:port. Use brackets for IPv6 with a port.
-## Supply a user in the connection or --user. Port defaults to 22; options override connection values.
+## User defaults to the local account and port to 22; connection values and options override defaults.
 ## Connect directly without SSH config. Default keys/agent are used if identity is omitted.
 ## Save connection settings locally; do not contact the host or store passwords/private keys.
 ##</help>

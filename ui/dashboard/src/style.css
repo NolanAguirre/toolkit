@@ -63,8 +63,6 @@ header + .error { margin-top: 28px; }
 .resources time { font-size: 11px; color: #62706a; }
 .empty { color: #62706a; font-size: 13px; line-height: 1.6; }
 .inline-form { border-top: 1px solid #e8ede7; padding: 18px 24px 22px; display: grid; gap: 16px; }
-.inline-form-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.inline-form-heading h3 { margin: 0; }
 .repo-list .inline-form { padding: 14px 16px 16px; }
 fieldset { padding: 0; border: 0; margin: 0; display: grid; gap: 20px; }
 fieldset > label { display: grid; gap: 9px; font-size: 13px; font-weight: 600; max-width: 640px; }
@@ -84,6 +82,8 @@ main > .error { margin-bottom: 20px; border: 1px solid #eacfc9; border-radius: 8
 .deployment-files { border-top: 1px solid #e8ede7; padding: 22px 28px; }
 .deploy-form { border-top: 1px solid #e8ede7; padding: 22px 28px; }
 .deploy-form > .hint { margin-top: 16px; }
+.deployment-options > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.deployment-options > fieldset { margin-top: 20px; }
 .deploy-output { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; }
 h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 .deployment-files ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; font-size: 12px; }

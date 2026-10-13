@@ -1,7 +1,9 @@
 #!/bin/sh
 ##<help>
 ## service add - Scaffold a service beneath the current repository's services directory.
-## Usage: bootstrap service add <name> --type=nodejs [--support=http] [--support=fs] [--support=db] [--support=python]
+## Usage: bootstrap service add <name> --type=<nodejs|node-ml> [--support=http] [--support=fs] [--support=db] [--support=python]
+## List type configuration with bootstrap service type ls. node-ml always includes python.
+## --type=nodejs --support=python remains available for compatibility.
 ## Options accept =value or a separate value. --support may be repeated.
 ## Run npm init -y and create env-dir/default and env-dir/$USER with matching values.
 ## Include a simple Makefile with help, install, build and background start targets.
@@ -30,7 +32,7 @@
 set -e
 . "$(dirname "$0")/../../lib/bootstrap.sh"
 if [ "$#" -lt 1 ]; then
-    bootstrap_error 'usage: bootstrap service add <name> --type=nodejs [--support=http] [--support=fs] [--support=db] [--support=python]'
+    bootstrap_error 'usage: bootstrap service add <name> --type=<nodejs|node-ml> [--support=http] [--support=fs] [--support=db] [--support=python]'
 fi
 name=$1
 shift
@@ -65,10 +67,14 @@ while [ "$#" -gt 0 ]; do
 
     case "$option" in
         --type)
-            if [ "$value" != nodejs ]; then
-                bootstrap_error "unsupported $option value: $value"
-            fi
-            type=nodejs
+            case "$value" in
+                nodejs|node-ml)
+                    type=$value
+                    ;;
+                *)
+                    bootstrap_error "unsupported $option value: $value"
+                    ;;
+            esac
             ;;
         --support)
             case "$value" in
@@ -91,9 +97,17 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
-if [ "$type" != nodejs ]; then
-    bootstrap_error '--type=nodejs is required'
-fi
+case "$type" in
+    node-ml)
+        python=1
+        type=nodejs
+        ;;
+    nodejs)
+        ;;
+    *)
+        bootstrap_error '--type=nodejs or --type=node-ml is required'
+        ;;
+esac
 if [ -z "$USER" ] || [ "$USER" = . ] || [ "$USER" = .. ] || printf '%s\n' "$USER" | grep -q /; then
     bootstrap_error 'USER must be a nonempty directory name'
 fi

@@ -1,0 +1,1 @@
+/home/nolan/.s6craft/AGENTS.md

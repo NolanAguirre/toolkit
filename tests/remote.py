@@ -232,13 +232,14 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     remote('create', 'demo', 'deployer@192.0.2.10', ok=False)
     for connection in ('-oProxyCommand=bad', 'x\ntrue', 'user:password@host', 'ssh://user@host/path', 'user@host:0', 'user@host:65536', 'user@host:bad', 'user@@host'):
         remote('edit', 'demo', connection, ok=False)
-    remote('edit', 'demo', 'host', ok=False)  # Explicit user is required.
     remote('edit', 'demo', 'user@host', '--identity-file', 'relative', ok=False)
     remote('edit', 'demo', 'user@host', '--identity-file', '/tmp/key\nother', ok=False)
     remote('edit', 'demo', 'user@host', '--port', '22x', ok=False)
     remote('edit', 'demo', 'user@host', '--unknown', 'value', ok=False)
     remote('edit', 'demo', 'user@host', '--user', ok=False)
     assert json.loads(target.read_text()) == expected
+    remote('edit', 'demo', 'host')
+    assert json.loads(target.read_text()) == {'host': 'host', 'user': subprocess.check_output(['id', '-un'], text=True).strip(), 'port': 22, 'identityFile': None}
     remote('edit', 'demo', 'ssh://alice@[2001:db8::1]:2200')
     assert json.loads(target.read_text()) == {'host': '2001:db8::1', 'user': 'alice', 'port': 2200, 'identityFile': None}
     remote('edit', 'demo', 'bob@example.com')

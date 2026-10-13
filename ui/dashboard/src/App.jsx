@@ -24,25 +24,36 @@ async function api(url, body, signal) {
 
 const options = {
   create: [['nginx', 'Nginx reverse proxy']],
-  services: [['http', 'HTTP port'], ['fs', 'Filesystem storage'], ['db', 'Same-name database']],
   uis: [['component-library', 'Existing component library']],
+}
+const serviceOptionLabels = {
+  http: 'HTTP port',
+  fs: 'Filesystem storage',
+  db: 'Same-name database',
+  python: 'ML (Python consumer)',
 }
 const optionDevIds = {
   nginx: 'a2k9m4p',
   http: 'v7c1n8d',
   fs: 'q4w6h2j',
   db: 'e8r3t5y',
+  python: 'j8p4m2l',
   'component-library': 'u1i6o9s',
 }
-const labels = { create: 'New repository', import: 'Import repository', services: 'Add Node.js service', uis: 'Add React UI', databases: 'Add database' }
+const labels = { create: 'New repository', import: 'Import repository', services: 'Add service', uis: 'Add React UI', databases: 'Add database' }
 
-function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose }) {
+function CreateForm({ kind, repo, parentPath, serviceTypes, busy, setBusy, onComplete, onClose }) {
   const [name, setName] = useState('')
   const [directory, setDirectory] = useState(kind === 'create' ? parentPath : '')
   const [support, setSupport] = useState(kind === 'services' ? ['http'] : [])
+  const [serviceType, setServiceType] = useState('nodejs')
   const [engine, setEngine] = useState('sqlite')
   const [error, setError] = useState('')
   const [created, setCreated] = useState(false)
+  const selectedType = serviceTypes[serviceType]
+  const visibleOptions = kind === 'services' ? selectedType?.options.map(value => [value, serviceOptionLabels[value] || value]) : options[kind]
+  const requiredOptions = kind === 'services' ? selectedType?.required || [] : []
+  const selectedSupport = [...new Set([...support, ...requiredOptions])]
   const pattern = kind === 'databases' ? '[a-z][a-z0-9_]{0,62}' : kind === 'create' ? '[A-Za-z0-9][A-Za-z0-9._-]*' : '[a-z0-9][a-z0-9._-]*'
 
   async function submit(event) {
@@ -52,7 +63,7 @@ function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose
     let result
     try {
       const endpoint = kind === 'create' ? '/api/repos' : kind === 'import' ? '/api/repos/import' : `/api/repos/${encodeURIComponent(repo.name)}/${kind}`
-      const body = kind === 'import' ? { path: directory } : { name, support: kind === 'databases' ? [engine] : support, ...(kind === 'create' ? { parentPath: directory } : {}) }
+      const body = kind === 'import' ? { path: directory } : { name, support: kind === 'databases' ? [engine] : selectedSupport, ...(kind === 'create' ? { parentPath: directory } : {}), ...(kind === 'services' ? { type: serviceType } : {}) }
       result = await api(endpoint, body)
       setCreated(true)
     } catch (failure) {
@@ -62,14 +73,18 @@ function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose
     setBusy(false)
   }
 
-  return <DevScope id="s5d2f6g" state={{ kind, busy, created, error: Boolean(error) }}><form className="inline-form" onSubmit={submit} aria-labelledby="form-title">
-    <DevScope id="m4c8v2b"><div className="inline-form-heading"><h3 id="form-title">{labels[kind]}</h3></div></DevScope>
-    <fieldset disabled={busy || created}>
+  return <DevScope id="s5d2f6g" state={{ kind, serviceType, busy, created, error: Boolean(error) }}><form className="inline-form" onSubmit={submit} aria-label={labels[kind]}>
+    <fieldset disabled={busy || created || (kind === 'services' && !selectedType)}>
+        {kind === 'services' && <DevScope id="k3s8n6v" state={{ serviceType }}><label>Service type<select value={serviceType} onChange={event => {
+          const type = event.target.value
+          setServiceType(type)
+          setSupport(support.filter(option => serviceTypes[type].options.includes(option) && !serviceTypes[type].required.includes(option)))
+        }}>{Object.entries(serviceTypes).map(([value, type]) => <option key={value} value={value}>{type.label}</option>)}</select></label></DevScope>}
         {kind !== 'import' && <DevScope id="w6n1q9e"><label>Name<input required autoFocus value={name} onChange={event => setName(event.target.value)} pattern={pattern} maxLength={kind === 'databases' ? 63 : 128} placeholder={kind === 'create' ? 'my-project' : kind === 'services' ? 'api' : kind === 'uis' ? 'dashboard' : 'app'} /></label></DevScope>}
-        {['create', 'import'].includes(kind) && <DevScope id="b3h7d5k" state={{ kind }}><label>{kind === 'create' ? 'Parent directory' : 'Existing repository path'}<input required autoFocus={kind === 'import'} value={directory} onChange={event => setDirectory(event.target.value)} placeholder="/home/you/projects/my-project" pattern="/.*" /><span className="hint">{kind === 'create' ? `Creates a new directory${name ? ` named ${name}` : ''} here using your shared ~/.s6craft rules.` : 'Must contain a services/ directory. Existing files are preserved; ports are discovered and registered.'}</span></label></DevScope>}
+        {['create', 'import'].includes(kind) && <DevScope id="b3h7d5k" state={{ kind }}><label>{kind === 'create' ? 'Parent directory' : 'Existing repository path'}<input required autoFocus={kind === 'import'} value={directory} onChange={event => setDirectory(event.target.value)} placeholder="/home/you/projects/my-project" pattern="/.*" /><span className="hint">{kind === 'create' ? `Creates a new directory${name ? ` named ${name}` : ''} here using your shared ~/.s6craft rules.` : 'Must contain a services/ directory. Adds missing shared rule and skill links from ~/.s6craft, preserves existing files, and registers discovered ports.'}</span></label></DevScope>}
         {kind === 'databases' && <DevScope id="y2p6s8f" state={{ engine }}><label>Database backend<select value={engine} onChange={event => setEngine(event.target.value)}><option value="sqlite">SQLite</option><option value="postgres">PostgreSQL</option></select><span className="hint">Creates a Sqitch scaffold and registers it. Does not run migrations.</span></label></DevScope>}
-        {options[kind] && <DevScope id="c9a4t1r" state={{ kind }}><div className="options">{options[kind].map(([value, label]) => <DevScope id={optionDevIds[value]} key={value}><label className="checkbox"><input type="checkbox" checked={support.includes(value)} onChange={event => setSupport(event.target.checked ? [...support, value] : support.filter(option => option !== value))} />{label}</label></DevScope>)}</div></DevScope>}
-        {kind === 'services' && <DevScope id="g7k2m5x"><p className="hint">Creates the Node.js package and environment files. Add application code before starting it. Database support requires a database with this service’s name.</p></DevScope>}
+        {visibleOptions && <DevScope id="c9a4t1r" state={{ kind, serviceType }}><div className="options">{visibleOptions.map(([value, label]) => <DevScope id={optionDevIds[value]} key={value}><label className="checkbox"><input type="checkbox" checked={selectedSupport.includes(value)} disabled={requiredOptions.includes(value)} onChange={event => setSupport(event.target.checked ? [...support, value] : support.filter(option => option !== value))} />{label}{requiredOptions.includes(value) && <span className="hint">Required</span>}</label></DevScope>)}</div></DevScope>}
+        {kind === 'services' && <DevScope id="g7k2m5x"><p className="hint">{selectedType ? `${selectedType.hint} Database support requires a database with this service’s name.` : 'Service types are not available yet.'}</p></DevScope>}
         {kind === 'uis' && <DevScope id="d1v8n3q"><p className="hint">Creates a React/Vite app. Component library support requires component-library/ in this repo. Install dependencies after scaffolding.</p></DevScope>}
         <div className="form-actions"><DevScope id="o5j9w4c"><button className="primary" type="submit">{busy ? 'Working…' : labels[kind]}</button></DevScope><DevScope id="x4b7n2k"><button type="button" disabled={busy} onClick={onClose}>Cancel</button></DevScope></div>
     </fieldset>
@@ -98,7 +113,7 @@ function ReleaseIdentity({ title, release }) {
 function DeploymentView({ data, repo, busy, setBusy }) {
   const [live, setLive] = useState(null)
   const [checking, setChecking] = useState(false)
-  const [releasePath, setReleasePath] = useState('')
+  const [releasePath, setReleasePath] = useState(data.releases[0]?.path || '')
   const [service, setService] = useState('')
   const [deploying, setDeploying] = useState(false)
   const [result, setResult] = useState(null)
@@ -171,21 +186,34 @@ function DeploymentView({ data, repo, busy, setBusy }) {
       {target?.legacy && <p className="notice">This target uses a legacy SSH alias. Save an IP address, DNS hostname or connection string to replace it.</p>}
       <fieldset disabled={busy || checking}>
         <label>Host or SSH connection<input required value={connection} onChange={event => { setConnection(event.target.value); setSshUser(''); setSshPort('') }} placeholder="192.168.1.50 or ssh://deploy@example.com:2222" /><span className="hint">Accepts an IP address, DNS hostname, user@host or ssh://user@host:port.</span></label>
-        <label>SSH user<input value={sshUser} onChange={event => setSshUser(event.target.value)} placeholder="deploy" /><span className="hint">Required for a bare host. If supplied here, overrides the connection string’s user.</span></label>
-        <label>SSH port<input type="number" min="1" max="65535" step="1" value={sshPort} onChange={event => setSshPort(event.target.value)} placeholder="22" /><span className="hint">Optional override; defaults to the connection string’s port or 22.</span></label>
-        <label>SSH key path<input value={identityFile} onChange={event => setIdentityFile(event.target.value)} placeholder="/home/you/.ssh/id_ed25519" pattern="/.*" /><span className="hint">Optional absolute path on the API machine. Otherwise uses default SSH keys or the agent.</span></label>
+        <p className="hint">Only the host is required. Defaults: SSH user {data.remoteDefaults.user}, port {data.remoteDefaults.port}, and your default SSH keys or agent. A connection string can supply a different user or port.</p>
+        <details className="deployment-options">
+          <summary>SSH settings (optional)</summary>
+          <fieldset>
+            <label>SSH user<input value={sshUser} onChange={event => setSshUser(event.target.value)} placeholder={data.remoteDefaults.user} /><span className="hint">Leave blank to use the connection string’s user or {data.remoteDefaults.user}. An explicit value overrides the connection string.</span></label>
+            <label>SSH port<input type="number" min="1" max="65535" step="1" value={sshPort} onChange={event => setSshPort(event.target.value)} placeholder="22" /><span className="hint">Optional override; defaults to the connection string’s port or 22.</span></label>
+            <label>SSH key path<input value={identityFile} onChange={event => setIdentityFile(event.target.value)} placeholder="/home/you/.ssh/id_ed25519" pattern="/.*" /><span className="hint">Optional absolute path on the API machine. Otherwise uses default SSH keys or the agent.</span></label>
+          </fieldset>
+        </details>
         <button type="submit">Save target</button>
       </fieldset>
-      <p className="hint">Connection settings are saved locally as JSON. No SSH config entry is needed. The host needs SSH access, s6 and noninteractive sudo for deployment.</p>
+      <p className="hint">The host needs SSH access, s6 and noninteractive sudo for deployment.</p>
       {targetChanged && <p className="hint">Save target changes before checking or deploying.</p>}
       {targetError && <p className="form-error" role="alert">{targetError}</p>}
       {targetNotice && <p className="success" role="status">{targetNotice}</p>}
     </form>
     <form className="deploy-form" onSubmit={deploy} aria-label="Deploy release">
       <fieldset disabled={busy || checking || !target || targetChanged}>
-        <label>Service<select value={service} onChange={event => { setService(event.target.value); setReleasePath('') }}><option value="">All services</option>{data.services.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>Service<select value={service} onChange={event => {
+          const nextService = event.target.value
+          const currentPath = releasePath.replace(/\/+$/, '')
+          const bundle = (service ? (currentPath.endsWith(`/${service}`) ? currentPath.slice(0, -service.length - 1) : '') : currentPath) || data.releases[0]?.path
+          setService(nextService)
+          setReleasePath(bundle ? (nextService ? `${bundle}/${nextService}` : bundle) : '')
+        }}><option value="">All services</option>{data.services.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
         <label>Release directory<input required value={releasePath} onChange={event => setReleasePath(event.target.value)} list="release-paths" placeholder={service ? `/absolute/path/to/release/${service}` : '/absolute/path/to/release'} pattern="/.*" /><span className="hint">{service ? 'Choose the prepared service directory containing an executable run file.' : 'Choose a prepared bundle containing a directory with an executable run file for every service.'}</span></label>
         <datalist id="release-paths">{data.releases.map(release => <option key={release.path} value={service ? `${release.path}/${service}` : release.path} />)}</datalist>
+        <p className="hint">{data.releases.length ? 'Defaults to all services and the most recently modified local release. You can select another release above.' : 'No local release is available yet. Build and package a release, then reopen Deployments, or enter a prepared release directory above.'}</p>
         <p className="hint">Deploys to {target?.host || 'the registered SSH target'}, selects the release and requests service restarts. Services marked down stay down. Build and package artifacts before deploying.</p>
         <button className="primary" type="submit">{deploying ? 'Deploying…' : `Deploy ${service || 'all services'}`}</button>
       </fieldset>
@@ -212,6 +240,7 @@ export default function App() {
   const [repos, setRepos] = useState([])
   const [selected, setSelected] = useState('')
   const [parentPath, setParentPath] = useState('')
+  const [serviceTypes, setServiceTypes] = useState({})
   const [detail, setDetail] = useState(null)
   const [deployment, setDeployment] = useState(null)
   const [view, setView] = useState('resources')
@@ -236,7 +265,10 @@ export default function App() {
 
   useEffect(() => {
     refresh()
-    api('/api/config').then(data => setParentPath(data.parentPath)).catch(failure => setError(failure.message))
+    api('/api/config').then(data => {
+      setParentPath(data.parentPath)
+      setServiceTypes(data.serviceTypes || {})
+    }).catch(failure => setError(failure.message))
   }, [])
 
   useEffect(() => {
@@ -272,7 +304,7 @@ export default function App() {
   }
 
   const repo = repos.find(repo => repo.name === selected)
-  const createForm = form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />
+  const createForm = form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} serviceTypes={serviceTypes} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
     <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><span className="local">Local workspace</span></header></DevScope>
     {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}

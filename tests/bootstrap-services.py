@@ -25,6 +25,12 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
 
     call('bootstrap.bin/setup')
     call('port.bin/setup')
+    catalog = call('bootstrap', 'service', 'type', 'ls').splitlines()
+    assert catalog[0].split('\t') == ['type', 'label', 'options', 'required', 'description']
+    configs = {row.split('\t')[0]: row.split('\t') for row in catalog[1:]}
+    assert configs['nodejs'][2:4] == ['http,fs,db', '-']
+    assert configs['node-ml'][2:4] == ['http,fs,db,python', 'python']
+    call('bootstrap', 'service', 'type', 'ls', 'unexpected', ok=False)
     fresh = root/'fresh'
     (fresh/'services').mkdir(parents=True)
     call('bootstrap', 'repo', 'load', str(fresh))
@@ -56,6 +62,9 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     call('bootstrap', 'service', 'add', 'batch', '--type=nodejs', '--support=python', cwd=fresh)
     assert (fresh/'services/batch/remote-services').read_text() == 'batch:-\nbatch-consumer:-\n'
     assert not (fresh/'services/new/remote-services').exists()
+    call('bootstrap', 'service', 'add', 'ml', '--type=node-ml', cwd=fresh)
+    assert (fresh/'services/ml/cli/consumer.py').is_file()
+    assert (fresh/'services/ml/remote-services').read_text() == 'ml:-\nml-consumer:-\n'
 
     before = (tagger/'remote-services').read_bytes()
     call('bootstrap', 'service', 'add', 'tagger', '--type=nodejs', '--support=python', cwd=fresh, ok=False)

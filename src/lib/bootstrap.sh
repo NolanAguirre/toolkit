@@ -3,6 +3,13 @@
 
 bootstrap_error() { echo "error: $*" >&2; exit 1; }
 
+# Preserve existing files, directories and even dangling links on re-import.
+bootstrap_link_missing() {
+    if [ ! -e "$2" ] && [ ! -L "$2" ]; then
+        ln -sT -- "$1" "$2"
+    fi
+}
+
 bootstrap_name() {
     # grep -z checks the whole argument, including any embedded newlines.
     if [ "$1" = ports ] || ! printf '%s' "$1" | grep -zq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then

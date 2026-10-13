@@ -82,6 +82,36 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     assert.equal((await (await get('/api/repos')).json()).repos.find(repo => repo.current).name, 'example')
   })
 
+  await t.test('service types enforce the Python scaffold for Node ML', async () => {
+    const config = await (await get('/api/config')).json()
+    assert.deepEqual(Object.keys(config.serviceTypes), ['nodejs', 'node-ml'])
+    assert.deepEqual(config.serviceTypes.nodejs.required, [])
+    assert.deepEqual(config.serviceTypes['node-ml'].required, ['python'])
+    assert.deepEqual(config.serviceTypes['node-ml'].options, ['http', 'fs', 'db', 'python'])
+    const plain = await post('/api/repos/imported/services', { name: 'plain', type: 'nodejs', support: [] })
+    assert.equal(plain.status, 201, JSON.stringify(await plain.clone().json()))
+    assert.equal(existsSync(path.join(directory, 'imported/services/plain/cli')), false)
+    // Even a client omitting the required option must get the ML scaffold.
+    const ml = await post('/api/repos/imported/services', { name: 'ml', type: 'node-ml', support: [] })
+    assert.equal(ml.status, 201, JSON.stringify(await ml.clone().json()))
+    const mlPath = path.join(directory, 'imported/services/ml')
+    assert.ok(existsSync(path.join(mlPath, 'cli/consumer.py')))
+    assert.ok(existsSync(path.join(mlPath, 'cli/fsqueue.py')))
+    assert.equal(readFileSync(path.join(mlPath, 'remote-services'), 'utf8'), 'ml:-\nml-consumer:-\n')
+    assert.equal(readFileSync(path.join(mlPath, 'env-dir/default/QUEUE_DIR'), 'utf8').trim(), '/tmp/imported/queues/ml')
+    const explicit = await post('/api/repos/imported/services', { name: 'ml-http', type: 'node-ml', support: ['http', 'python'] })
+    assert.equal(explicit.status, 201, JSON.stringify(await explicit.clone().json()))
+    assert.equal(readFileSync(path.join(directory, 'imported/services/ml-http/remote-services'), 'utf8'), 'ml-http:PORT\nml-http-consumer:-\n')
+    assert.ok(existsSync(path.join(directory, 'imported/services/ml-http/env-dir/default/PORT')))
+    for (const body of [
+      { type: 'unknown' }, { type: null }, { type: 'nodejs', support: ['python'] },
+      { type: 'node-ml', support: ['unknown'] }, { type: 'node-ml', support: ['python', 'python'] },
+    ]) {
+      assert.equal((await post('/api/repos/imported/services', { name: 'invalid', ...body })).status, 400)
+      assert.equal(existsSync(path.join(directory, 'imported/services/invalid')), false)
+    }
+  })
+
   await t.test('concurrent duplicate additions publish once and preserve port reservations', async () => {
     const responses = await Promise.all([
       post('/api/repos/example/services', { name: 'worker', support: ['http'] }),
@@ -134,6 +164,9 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
     assert.deepEqual((await response.json()).target, { host: '192.0.2.20', user: 'deployer', port: 22, identityFile: null, legacy: false })
     assert.deepEqual(JSON.parse(readFileSync(config, 'utf8')), { host: '192.0.2.20', user: 'deployer', port: 22, identityFile: null })
+    response = await post('/api/repos/example/target', { host: '192.0.2.21' })
+    assert.equal(response.status, 200)
+    assert.deepEqual((await response.json()).target, { host: '192.0.2.21', user: require('node:os').userInfo().username, port: 22, identityFile: null, legacy: false })
     response = await post('/api/repos/example/target', { connection: 'ssh://alice@[2001:db8::1]:2200', identityFile: '/tmp/key with spaces' })
     assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
     assert.deepEqual((await response.json()).target, { host: '2001:db8::1', user: 'alice', port: 2200, identityFile: '/tmp/key with spaces', legacy: false })
@@ -141,7 +174,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     for (const body of [{}, { host: 'host', connection: 'user@host' }, { host: '\n' }, { connection: 'user@host', port: 65536 }, { connection: 'user@host', port: '22' }, { connection: 'user@host', user: '-root' }, { connection: 'user@host', identityFile: 'relative' }, { connection: 'user@host', password: 'never-store' }]) {
       assert.equal((await post('/api/repos/example/target', body)).status, 400)
     }
-    for (const connection of ['user:password@host', 'ssh://user@host/path', 'user@host:bad', 'host']) {
+    for (const connection of ['user:password@host', 'ssh://user@host/path', 'user@host:bad']) {
       assert.equal((await post('/api/repos/example/target', { connection })).status, 422)
     }
     assert.equal(readFileSync(config, 'utf8'), unchanged)

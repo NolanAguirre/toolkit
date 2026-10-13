@@ -39,6 +39,14 @@ with tempfile.TemporaryDirectory() as tmp:
 
     call('bootstrap.bin/setup')
     call('port.bin/setup')
+    shared = root/'home/.s6craft'
+    (shared/'.cursor/rules').mkdir(parents=True)
+    (shared/'.cursor/rules/general.mdc').write_text('shared rules\n')
+    (shared/'.cursor/skills/example').mkdir(parents=True)
+    (shared/'.cursor/skills/example/SKILL.md').write_text('shared skill\n')
+    (shared/'AGENTS.md').write_text('shared agents\n')
+    (shared/'.cursorignore').write_text('node_modules\n')
+    (shared/'.cursorrules').write_text('shared cursor rules\n')
     index = root/'state/ports/allocate/ports'
     existing = repo('existing', 9000)
     call('port', 'allocate', 'create', 'existing')
@@ -51,6 +59,38 @@ with tempfile.TemporaryDirectory() as tmp:
     assert index.read_bytes() == before
     assert metadata.read_bytes() == metadata_before
     assert (root/'state/bootstrap/current_repo').read_text().strip() == 'existing'
+    assert (existing/'AGENTS.md').is_symlink()
+    assert (existing/'AGENTS.md').resolve() == shared/'AGENTS.md'
+    assert (existing/'.cursorignore').resolve() == shared/'.cursorignore'
+    assert (existing/'.cursorrules').resolve() == shared/'.cursorrules'
+    assert (existing/'.cursor/rules/general.mdc').resolve() == shared/'.cursor/rules/general.mdc'
+    assert (existing/'.cursor/skills/example').resolve() == shared/'.cursor/skills/example'
+    # Re-import adds newly shared rules while preserving local files and dangling links.
+    (existing/'AGENTS.md').unlink()
+    (existing/'AGENTS.md').write_text('local instructions\n')
+    (existing/'.cursor/rules/general.mdc').unlink()
+    (existing/'.cursor/rules/general.mdc').write_text('local rule\n')
+    (existing/'.cursorrules').unlink()
+    (existing/'.cursorrules').symlink_to(root/'missing-rules')
+    (shared/'.cursor/rules/new.mdc').write_text('new shared rule\n')
+    call('bootstrap', 'repo', 'import', str(existing))
+    assert (existing/'AGENTS.md').read_text() == 'local instructions\n'
+    assert (existing/'.cursor/rules/general.mdc').read_text() == 'local rule\n'
+    assert (existing/'.cursorrules').readlink() == root/'missing-rules'
+    assert (existing/'.cursor/rules/new.mdc').resolve() == shared/'.cursor/rules/new.mdc'
+    # Reject missing sources and linked parent directories before allocating ports.
+    missing_rules = repo('missing-rules')
+    before = index.read_bytes()
+    (shared/'AGENTS.md').rename(shared/'saved-agents')
+    call('bootstrap', 'repo', 'import', str(missing_rules), ok=False)
+    assert index.read_bytes() == before
+    assert not (missing_rules/'.cursor').exists()
+    (shared/'saved-agents').rename(shared/'AGENTS.md')
+    linked_rules = repo('linked-rules')
+    (linked_rules/'.cursor').symlink_to(shared/'.cursor', target_is_directory=True)
+    call('bootstrap', 'repo', 'import', str(linked_rules), ok=False)
+    assert index.read_bytes() == before
+    assert not (root/'state/bootstrap/repos/linked-rules').exists()
 
     relative = repo('relative')
     assert call('bootstrap', 'repo', 'import', './relative', cwd=root) == str(relative)

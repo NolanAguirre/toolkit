@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useFormReady } from 'component-library'
 
 export const BASE = import.meta.env.VITE_HARNESS_API_BASE || '/dashboard/harness-api'
@@ -27,17 +27,11 @@ export const HarnessFields = ({ form, inspector }) => {
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(null)
   const [attempt, setAttempt] = useState(0)
-  const promptPrefix = inspector?.descriptor?.leaf ? `For ${inspector.descriptor.leaf} ` : ''
-  const previousPrefix = useRef('')
-  const prompt = form.values.prompt
-  const promptDirty = form.dirty?.prompt
+  const promptDefault = inspector?.descriptor?.leaf ? `for <${inspector.descriptor.leaf}> ` : ''
+  const setDefault = form.setDefault
   useEffect(() => {
-    if (((!promptDirty && prompt === '') || (previousPrefix.current !== promptPrefix && prompt === previousPrefix.current))
-      && prompt !== promptPrefix) {
-      setValue('prompt', promptPrefix)
-    }
-    previousPrefix.current = promptPrefix
-  }, [promptPrefix, prompt, promptDirty, setValue])
+    setDefault('prompt', promptDefault)
+  }, [promptDefault, setDefault])
   useFormReady(form, 'component', loaded && Boolean(provider?.implemented && !provider.error))
   useEffect(() => {
     let cancelled = false

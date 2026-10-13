@@ -99,13 +99,13 @@ if [ "$nginx" = 1 ]; then
 fi
 for rule in "$rules_dir"/.cursor/rules/*.mdc; do
     [ -f "$rule" ] || continue
-    ln -s -- "$rule" "$path/.cursor/rules/${rule##*/}"
+    bootstrap_link_missing "$rule" "$path/.cursor/rules/${rule##*/}"
 done
-ln -s -- "$rules_dir/AGENTS.md" "$path/AGENTS.md"
-ln -s -- "$rules_dir/.cursorignore" "$path/.cursorignore"
-ln -s -- "$cursor_rules" "$path/.cursorrules"
+bootstrap_link_missing "$rules_dir/AGENTS.md" "$path/AGENTS.md"
+bootstrap_link_missing "$rules_dir/.cursorignore" "$path/.cursorignore"
+bootstrap_link_missing "$cursor_rules" "$path/.cursorrules"
 for skill in "$rules_dir"/.cursor/skills/*; do
     [ -d "$skill" ] && [ -f "$skill/SKILL.md" ] || continue
-    ln -s -- "$skill" "$path/.cursor/skills/${skill##*/}"
+    bootstrap_link_missing "$skill" "$path/.cursor/skills/${skill##*/}"
 done
 bootstrap_register "$name" "$path"

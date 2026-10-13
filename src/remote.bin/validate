@@ -29,7 +29,7 @@ case "$action" in
         repo=$1
         connection=$2
         REMOTE_TARGET=$connection
-        REMOTE_USER=
+        REMOTE_USER=$(id -un)
         REMOTE_PORT=22
         REMOTE_IDENTITY=
         case "$REMOTE_TARGET" in
