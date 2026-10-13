@@ -27,7 +27,7 @@ export const HarnessFields = ({ form, inspector }) => {
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(null)
   const [attempt, setAttempt] = useState(0)
-  const promptDefault = inspector?.descriptor?.leaf ? `for <${inspector.descriptor.leaf}> ` : ''
+  const promptDefault = inspector?.descriptor?.leaf ? `for ${inspector.descriptor.leaf} ` : ''
   const setDefault = form.setDefault
   useEffect(() => {
     setDefault('prompt', promptDefault)
