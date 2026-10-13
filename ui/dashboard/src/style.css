@@ -34,7 +34,6 @@ footer { display: flex; justify-content: space-between; gap: 16px; color: #71807
 main { max-width: 1320px; }
 .intro { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding-top: 40px; }
 .intro p:not(.eyebrow) { color: #62706a; line-height: 1.6; }
-.actions { display: flex; gap: 10px; flex-shrink: 0; }
 .primary { color: white; background: #286449; border-color: #286449; }
 .primary:hover { background: #1d4f38; }
 .workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 32px; align-items: start; }
@@ -42,6 +41,8 @@ main { max-width: 1320px; }
 .repo-list .panel-heading { padding: 18px 16px; gap: 8px; }
 .repo-list h2 { font-size: 14px; margin: 0; }
 .repo-list .panel-heading button { padding: 5px 10px; font-size: 18px; }
+.repo-actions { display: flex; gap: 8px; padding: 0 16px 14px; }
+.repo-actions button { flex: 1; padding: 8px 6px; white-space: nowrap; }
 .count { font-size: 11px; font-weight: 500; color: #6b7c70; margin-left: 5px; }
 .repo-choice { display: flex; width: calc(100% - 16px); margin: 3px 8px; justify-content: space-between; align-items: center; border-color: transparent; padding: 12px; text-align: left; color: #596b5e; overflow-wrap: anywhere; }
 .repo-choice.active { color: #22583f; background: #edf4ec; }
@@ -88,7 +89,7 @@ main > .error { margin-bottom: 20px; border: 1px solid #eacfc9; border-radius: 8
 h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 .deployment-files ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; font-size: 12px; }
 .notice { margin: 0; padding: 18px 28px; color: #62706a; background: #f8faf7; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-@media (max-width: 800px) { .workspace { grid-template-columns: 1fr; gap: 24px; } .repo-list { max-height: 260px; overflow-y: auto; } .intro { align-items: start; flex-direction: column; gap: 12px; } .repo-heading { flex-wrap: wrap; } .repo-choice { padding: 10px 12px; } }
+@media (max-width: 800px) { .workspace { grid-template-columns: 1fr; gap: 24px; } .repo-list { max-height: 320px; overflow-y: auto; } .repo-heading { flex-wrap: wrap; } .repo-choice { padding: 10px 12px; } }
 @media (max-width: 480px) { .resources li { align-items: start; flex-direction: column; } .deployment-summary { gap: 20px; flex-wrap: wrap; } }
 .live-releases { padding: 20px 28px; border-top: 1px solid #e8ede7; }
 .live-service { border: 1px solid #dce2da; border-radius: 8px; margin-top: 16px; overflow: hidden; }

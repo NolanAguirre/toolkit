@@ -268,12 +268,12 @@ export default function App() {
   const repo = repos.find(repo => repo.name === selected)
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
     <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><span className="local">Local workspace</span></header></DevScope>
-    <DevScope id="h6c1v5b"><section className="intro"><div><p className="eyebrow">WORKSPACE</p><h1>Build from here.</h1><p>Scaffold your next service. Keep every repository in view.</p></div><div className="actions"><button disabled={busy || loading} onClick={() => setForm('import')}>Import repo</button><button className="primary" disabled={busy || loading} onClick={() => setForm('create')}>+ New repo</button></div></section></DevScope>
+    <DevScope id="h6c1v5b"><section className="intro"><div><p className="eyebrow">WORKSPACE</p><h1>Build from here.</h1><p>Scaffold your next service. Keep every repository in view.</p></div></section></DevScope>
     {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
     {error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
     {form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />}
     <div className="workspace">
-      <DevScope id="z8x3c7v" state={{ count: repos.length, selected }}><aside className="panel repo-list" aria-label="Repositories"><div className="panel-heading"><h2>Repositories <span className="count">{repos.length}</span></h2><button disabled={busy || loading} onClick={() => refresh()} aria-label="Refresh repositories">↻</button></div>
+      <DevScope id="z8x3c7v" state={{ count: repos.length, selected }}><aside className="panel repo-list" aria-label="Repositories"><div className="panel-heading"><h2>Repositories <span className="count">{repos.length}</span></h2><button disabled={busy || loading} onClick={() => refresh()} aria-label="Refresh repositories">↻</button></div><div className="repo-actions"><button disabled={busy || loading} onClick={() => setForm('import')}>Import repo</button><button className="primary" disabled={busy || loading} onClick={() => setForm('create')}>+ New repo</button></div>
         {loading && <p className="empty">Refreshing…</p>}
         {!loading && !repos.length && <p className="empty">Create or import your first repository.</p>}
         {repos.map(item => <button key={item.name} className={`repo-choice ${selected === item.name ? 'active' : ''}`} aria-pressed={selected === item.name} disabled={busy} onClick={() => { setSelected(item.name); setForm(null); setError(''); setNotice('') }}><span>{item.name}</span>{item.current && <span className="selection-dot" title="Current bootstrap selection" aria-label="Current bootstrap selection" />}</button>)}
