@@ -1,0 +1,71 @@
+#!/bin/sh
+##<help>
+## nginx add - Add the repository UI/API nginx proxy to an existing repository.
+## Usage: bootstrap nginx add
+## Run from a registered repository root with an existing port domain.
+## Accept a missing or empty services/nginx directory; never replace existing configuration.
+## Reuse the repo-create nginx template and reserve its preferred port when available.
+## If that port is occupied, use a free port; preserve all existing application PORT files.
+## Create env-dir/default and env-dir/ENV_USER (or USER), with HOST=localhost.
+## Add application locations in services/nginx/routes/*.conf, then make -C services/nginx start.
+## Preserve the root Makefile. No nginx installation or process startup is performed.
+## Failed scaffolding removes its temporary files; completed port reservations remain for retry.
+## Print the created service path.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+[ "$#" -eq 0 ] || bootstrap_error 'usage: bootstrap nginx add'
+root=$(pwd -P)
+bootstrap_repo_entry "$root" >/dev/null
+domain=${root##*/}
+bootstrap_name "$domain"
+env_user=${ENV_USER:-${USER:-default}}
+case "$env_user" in
+    .|..|*/*)
+        bootstrap_error 'ENV_USER or USER must be a directory name'
+        ;;
+esac
+command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+if [ -L "$root/services" ] || { [ -e "$root/services" ] && [ ! -d "$root/services" ]; }; then
+    bootstrap_error 'services must be a real directory'
+fi
+path="$root/services/nginx"
+if [ -L "$path" ] || { [ -e "$path" ] && [ ! -d "$path" ]; }; then
+    bootstrap_error "path already exists: $path"
+fi
+if [ -d "$path" ] && [ -n "$(ls -A -- "$path")" ]; then
+    bootstrap_error "nginx directory is not empty: $path"
+fi
+mkdir -p -- "$root/services"
+pending=$(mktemp -d "$root/services/.nginx.XXXXXX")
+allocating=0
+trap 'rm -rf -- "$pending"; if [ "$allocating" = 1 ]; then
+    rm -f -- "$path/env-dir/$env_user/PORT"
+    rmdir -- "$path/env-dir/$env_user" "$path/env-dir" "$path" 2>/dev/null || true
+fi' 0
+trap 'exit 1' HUP INT TERM
+app="$pending/nginx"
+template="$(dirname "$0")/../template/nginx"
+mkdir -p -- "$app/env-dir/default" "$app/env-dir/$env_user" "$app/routes"
+cp -- "$template/Makefile" "$app/Makefile"
+cp -- "$template/start" "$app/start"
+cp -- "$template/nginx.conf" "$app/nginx.conf"
+cp -- "$template/gitignore" "$app/.gitignore"
+# Only the real service path is allocated; staging has no PORT files to discover.
+mkdir -p -- "$path/env-dir/$env_user"
+allocating=1
+port allocate default --service services/nginx >&2
+cp -- "$path/env-dir/$env_user/PORT" "$app/env-dir/default/PORT"
+printf '%s\n' localhost > "$app/env-dir/default/HOST"
+if [ "$env_user" != default ]; then
+    cp -- "$app/env-dir/default/PORT" "$app/env-dir/$env_user/PORT"
+    cp -- "$app/env-dir/default/HOST" "$app/env-dir/$env_user/HOST"
+fi
+rm -- "$path/env-dir/$env_user/PORT"
+rmdir -- "$path/env-dir/$env_user" "$path/env-dir" "$path"
+allocating=0
+mv -T -n -- "$app" "$path"
+if [ -d "$app" ]; then
+    bootstrap_error "path appeared during scaffolding: $path"
+fi
+printf '%s\n' "$path"

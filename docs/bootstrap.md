@@ -48,6 +48,33 @@ If a later write fails, completed reservations remain available for retry.
 Both bootstrap and port must be initialized. `bootstrap repo load` remains the
 lighter operation that only registers/selects a directory without importing ports.
 
+## Add nginx to an existing repository
+
+```sh
+bootstrap repo import .
+bootstrap nginx add
+```
+
+Run from the repository root. The command uses the same nginx template as
+`bootstrap repo create <name> --support=nginx`, accepting either a missing or
+empty `services/nginx` directory. Existing configurations are rejected without
+changes. The repository must be registered and have a port domain.
+
+The allocator discovers configured ports before reserving `services/nginx`. It
+prefers nginx's conventional block port (for example, 6760 in the 6700–6799
+block), falling back to a free port if needed. Existing reservations are reused.
+Only nginx receives new PORT files; application ports and the root Makefile are
+preserved. The default and selected `ENV_USER` (or `USER`) environments receive
+the allocated PORT and `HOST=localhost`. Failed scaffolding cleans up temporary
+files and retains completed reservations for retry.
+
+Add UI and API `location` blocks in `services/nginx/routes/*.conf`, then run
+`make -C services/nginx start`. nginx and envdir must be installed to start the
+proxy; scaffolding does not install software or start processes. The template
+forwards WebSocket upgrades and preserves the browser Host for same-origin APIs.
+Its unconfigured routes return 404. Wire the service into your root Makefile's
+start target when ready.
+
 ## Add a service
 
 Run from the repository root:

@@ -194,7 +194,7 @@ function createApi() {
       response.end(JSON.stringify(value))
     }
     try {
-      // Require a loopback Host and same-origin browser requests, including through Vite.
+      // Require a loopback Host and same-origin browser requests, including through nginx.
       const host = request.headers.host || ''
       if (!/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)) throw new ApiError(403, 'Only localhost requests are accepted.')
       if ((request.headers.origin && request.headers.origin !== `http://${host}`) || request.headers['sec-fetch-site'] === 'cross-site') {

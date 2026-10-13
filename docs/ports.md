@@ -39,6 +39,10 @@ allocates a stable port for the service and creates `$ENV_USER/PORT` (or
 visits existing `env-dir` and `env-dev` directories; it does not create those
 directories for services that have none.
 
+Use `port allocate default --service services/nginx` to fill missing PORT files
+for only that relative service path. Discovery still checks all configured ports
+before allocation, so existing application ports cannot be assigned to nginx.
+
 Services named `nginx` are allocated first, preferring the domain's hundred
 boundary plus ten times its thousands digit: `6060`, `6160`, `6260`, then
 `7070`, `7170`, `7270`, and `8080`, `8180`, etc. If that port is occupied or

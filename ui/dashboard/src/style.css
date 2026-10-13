@@ -1,7 +1,7 @@
 :root { font-family: Inter, system-ui, sans-serif; color: #202a29; background: #f5f6f2; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; }
-main { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+main { width: 100%; margin: 0; padding: 0 32px; }
 header { display: flex; justify-content: space-between; align-items: center; height: 96px; border-bottom: 1px solid #dce2da; }
 .brand { display: flex; align-items: center; gap: 12px; font: 700 24px ui-monospace, monospace; color: #21634f; text-decoration: none; }
 .brand span { font: 650 19px system-ui, sans-serif; color: #202a29; }
@@ -28,7 +28,6 @@ td { font-size: 14px; }
 .error { color: #923a34; background: #fff6f3; }
 footer { display: flex; justify-content: space-between; gap: 16px; color: #718075; font-size: 12px; padding: 28px 0; }
 @media (max-width: 640px) { main { padding: 0 18px; } header { height: 76px; } .panel-heading, th, td { padding: 18px; } footer { flex-direction: column; } }
-main { max-width: 1320px; }
 header + .workspace,
 header + .success,
 header + .error,

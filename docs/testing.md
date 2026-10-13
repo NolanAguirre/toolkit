@@ -1,5 +1,10 @@
 # Checking command help
 
+Run `python3 tests/bootstrap-nginx.py` for adding nginx to existing repositories:
+preferred/fallback ports, retained reservations, user environment overrides,
+preservation of application configuration, invalid paths, allocation failures,
+cleanup, and concurrent additions. It uses temporary installations and state.
+
 Run `python3 tests/bootstrap.py` for isolated repository import checks, including
 existing named and legacy reservations, conflicts, concurrent imports, and adding
 a service afterward. The test uses disposable installed commands and state, with

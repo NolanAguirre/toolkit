@@ -1,7 +1,7 @@
 #!/bin/sh
 ##<help>
 ## allocate default - Allocate service ports and fill missing development PORT files.
-## Usage: port allocate default [--strict-nginx]
+## Usage: port allocate default [--strict-nginx] [--service <relative/path>]
 ## Use the current directory name as an existing domain; scan env-dir and env-dev.
 ## Write ENV_USER/PORT (or USER/PORT); preserve existing user or fallback default/PORT.
 ## Existing files, including empty ones, are never overwritten. Skip dependency trees.
@@ -10,21 +10,29 @@
 ## 6060, 6160, ..., 7070, 7170, ..., 8080. Use a free block port if unavailable.
 ## --strict-nginx requires that preferred port for new nginx assignments; fail instead of falling back.
 ## When filling a missing PORT, existing nginx reservations must match in strict mode; never relocate them.
+## --service limits new PORT files to one service; still discover all configured ports to avoid conflicts.
 ## Print each newly written port. Retain completed allocations if a later write fails.
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/ports.sh"
 strict_nginx=0
-case "$#:${1:-}" in
-    0:)
-        ;;
-    1:--strict-nginx)
-        strict_nginx=1
-        ;;
-    *)
-        port_error 'usage: port allocate default [--strict-nginx]'
-        ;;
-esac
+service_filter=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --strict-nginx)
+            strict_nginx=1
+            shift
+            ;;
+        --service)
+            [ "$#" -ge 2 ] && [ -n "$2" ] || port_error 'missing value for --service'
+            service_filter=$2
+            shift 2
+            ;;
+        *)
+            port_error 'usage: port allocate default [--strict-nginx] [--service <relative/path>]'
+            ;;
+    esac
+done
 root=$(pwd -P)
 domain=${root##*/}
 port_require_domain "$domain"
@@ -52,7 +60,10 @@ find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv 
         done
     ' sh "$env_user" {} + > "$scan"
 # Reserve nginx first so ordinary services do not consume its preferred port.
-atomic_write "$scan" jq -cs 'sort_by((if (.service | split("/") | last) == "nginx" then 0 else 1 end), .service)[]' "$scan"
+atomic_write "$scan" jq -cs --arg service "$service_filter" '
+    map(select($service == "" or .service == $service))
+    | sort_by((if (.service | split("/") | last) == "nginx" then 0 else 1 end), .service)[]
+' "$scan"
 # Import configured ports before assigning new ones, under our existing lock.
 sh "$(dirname "$0")/discover" >/dev/null
 start=$(jq -r '.start' "$PORT_ROOT/$domain/.domain.json")

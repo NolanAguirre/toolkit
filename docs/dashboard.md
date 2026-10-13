@@ -2,32 +2,39 @@
 
 The dashboard lives in `ui/dashboard` and the Node.js API in `services/api`.
 Both were created with bootstrap. The toolkit port domain is 6700–6799:
-API 6700, UI 6701.
+API 6700, UI 6701, nginx 6760. nginx is the browser entry point.
 
 ```sh
 make install
 make start
 ```
 
-Open <http://localhost:6701/dashboard/>. In development the page includes the
+Open <http://localhost:6760/dashboard/>. In development the page includes the
 dev inspector (hold Alt, or latch Dev in the corner panel). Its harness form and
-session list call `/dashboard/harness-api`, which Vite proxies to the harness
-API. `HARNESS_PROXY_TARGET` overrides the default `http://127.0.0.1:6000`.
+session list call `/dashboard/harness-api`, which nginx proxies to the harness
+API at `http://127.0.0.1:6000/api`.
 The inspector is omitted from production builds. Development reads it from
 the sibling `visual-prompter/component-library`.
 
-Requires `envdir`, Node.js matching
+Requires `nginx`, `envdir`, Node.js matching
 `ui/dashboard/package.json`, and installed, initialized `bootstrap` and `port`
 commands on PATH. Keep the installed toolkit up to date with this checkout.
 `UTIL_PATH` selects toolkit state (normally `$HOME/.cerberus`). Install and initialize
 `remote` for deployment and host inspection. Target configuration also requires `jq`.
 
-`make start` uses `env-dir/$ENV_USER`, falling back to `env-dir/$USER`, and logs
-in each directory's `start.log`. For foreground development, run
+`make start` starts the API and UI in the background using `env-dir/$ENV_USER`,
+falling back to `env-dir/$USER`, with logs in each application's `start.log`.
+It then runs nginx in the foreground; Ctrl-C stops nginx. nginx writes access
+logs in `services/nginx/.runtime/access.log` and errors to stderr.
+For foreground application development, run
 `envdir "./env-dir/${ENV_USER:-$USER}" npm start` in each application directory
 in separate terminals; Ctrl-C stops them. Plain `npm start` uses the default
-HOST/PORT files unless overridden by environment variables. Vite proxies `/api`
-to the API environment's HOST/PORT; `API_URL` overrides its target.
+HOST/PORT files unless overridden by environment variables. Run
+`make services.nginx.start` separately if the API and UI are already running.
+nginx forwards `/dashboard/` (including hot-reload WebSockets) to Vite and `/api`
+to the API. Vite has no proxy configuration. Upstream addresses are explicit in
+`services/nginx/routes/dashboard.conf`; update that file if application ports or
+the harness target change. `API_URL` and `HARNESS_PROXY_TARGET` are no longer used.
 
 ## Dashboard workflows
 
@@ -115,7 +122,7 @@ Mutations require `Content-Type: application/json` and `X-Toolkit-Request: 1`.
 The browser supplies both. For example, to add a UI to a registered repo:
 
 ```sh
-curl --fail-with-body http://localhost:6700/api/repos/my-repo/uis \
+curl --fail-with-body http://localhost:6760/api/repos/my-repo/uis \
   -H 'Content-Type: application/json' \
   -H 'X-Toolkit-Request: 1' \
   -d '{"name":"dashboard"}'
@@ -124,7 +131,7 @@ curl --fail-with-body http://localhost:6700/api/repos/my-repo/uis \
 To save a target (creates or replaces its complete configuration):
 
 ```sh
-curl --fail-with-body http://localhost:6700/api/repos/my-repo/target \
+curl --fail-with-body http://localhost:6760/api/repos/my-repo/target \
   -H 'Content-Type: application/json' \
   -H 'X-Toolkit-Request: 1' \
   -d '{"connection":"ssh://deployer@example.com:2222","identityFile":"/home/you/.ssh/deploy_key"}'
@@ -140,14 +147,14 @@ To deploy a prepared bundle (add `"service":"api"` and point `releasePath` to
 that service's artifact directory for a single-service deployment):
 
 ```sh
-curl --fail-with-body http://localhost:6700/api/repos/my-repo/deployments \
+curl --fail-with-body http://localhost:6760/api/repos/my-repo/deployments \
   -H 'Content-Type: application/json' \
   -H 'X-Toolkit-Request: 1' \
   -d '{"releasePath":"/home/you/projects/my-repo/.release/build-001"}'
 ```
 
 The API binds only to loopback and requires a loopback Host header. Browser
-requests must be same-origin, including through the Vite proxy. There is no CORS
+requests must be same-origin, including through nginx. There is no CORS
 or network authentication: this is a local tool, with the filesystem privileges
 of the API process. Network hosting requires an authentication design first.
 
