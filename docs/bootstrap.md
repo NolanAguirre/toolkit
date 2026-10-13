@@ -93,9 +93,10 @@ and `env-dir/$USER`. Both environment directories receive the same initial value
   storage directory itself is not created.
 
 Support options are optional and repeatable, and also accept separate values
-such as `--support http`. Only `nodejs`, `http`, and `fs` are currently supported.
+such as `--support http`. The service type is `nodejs`; supported additions are
+`http`, `fs`, `db`, and `python`.
 Without support options, both environment directories are empty. No application
-code or dependencies are generated. Service names use lowercase letters, digits,
+code or dependencies are generated without Python support. Service names use lowercase letters, digits,
 dots, underscores and hyphens, starting with a letter or digit.
 
 Each service includes a simple Makefile. Plain `make` displays the echo-only help:
@@ -117,6 +118,28 @@ Existing service paths are never overwritten. Scaffolding occurs in a temporary
 directory and is cleaned up on failure. If publishing fails after port allocation,
 the stable reservation remains available for a retry. Concurrent bootstrap
 operations share the bootstrap lock; port allocation uses the port toolkit's lock.
+
+### Node service with a Python consumer
+
+```sh
+bootstrap service add tgr --type=nodejs --support=http --support=python
+```
+
+Keeps the Node application and `cli/consumer.py` together in `services/tgr/`.
+Python support adds `cli/fsqueue.py`, `cli/requirements.txt`, virtual-environment
+ignore rules, `make install.python` and foreground `make consumer`. Implement the
+consumer's model loading, processing and unloading hooks before using it.
+`QUEUE_DIR` defaults to `/tmp/<repo>/queues/tgr`; `GPU_LOCK_PATH` defaults to
+`/tmp/gpu.lock` or the invoking shell's override. Use a persistent queue path for
+production work that must survive reboot or temporary-directory cleanup.
+
+The generated `remote-services` file declares `tgr:PORT` and `tgr-consumer:-` as
+separate deployment identities. Without `--support=http`, both use `-` (no port).
+The foreground `run` launcher executes `node index.js`; `run-consumer` executes
+`cli/.venv/bin/python3 cli/consumer.py`. Package each launcher as `run` in its own
+artifact with the corresponding runtime files. Local Makefile behavior is unchanged.
+See [multiple deployment services](remote.md#multiple-deployment-services-in-one-source-folder)
+for artifact layout, independent deployment and shared queue permissions.
 
 ## Add a UI
 

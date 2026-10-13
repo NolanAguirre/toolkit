@@ -3,6 +3,7 @@
 ## deploy - Upload prepared service artifacts to their generated bin/deploy commands.
 ## Usage: remote deploy <repo> <release-directory>
 ## Usage: remote deploy <repo> <service> <release-directory>
+## Service names come from services/<folder>/remote-services when present, otherwise the folder name.
 ## A repository bundle contains <service>/run and that service's packaged files.
 ## A single-service directory contains run and its packaged files directly.
 ## Each run must be executable and keep the service in the foreground.

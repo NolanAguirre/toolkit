@@ -182,7 +182,7 @@ retry. There is no rollback of previously completed host operations.
 ## Inventory and ports
 
 The bootstrap registry resolves the repository path. Real immediate subdirectories
-of `services/` are the service inventory, regardless of implementation language.
+of `services/` each default to one deployment service, regardless of implementation language.
 Loose shared files are ignored; service-directory symlinks are rejected. No remote
 service registry is maintained, and the repository's `infrastructure/` directory
 is not used.
@@ -190,7 +190,7 @@ is not used.
 PORT lookup matches bootstrap import: inspect `env-dir` and `env-dev`, use
 `$ENV_USER` (or `$USER`, then `default` if neither is set), and fall back to
 `default/PORT` when that file is missing. Empty ports are skipped. Conflicting
-sources, duplicate selected-service ports and invalid port numbers fail before
+sources, duplicate deployment ports and invalid port numbers fail before
 SSH. Services without PORT are valid. Port allocation remains owned by bootstrap
 and port; remote never allocates a port or copies their registry. Explicitly set
 `ENV_USER=default` when that is the desired source.
@@ -201,6 +201,81 @@ Rerunning service setup updates PORT from the repository and removes the remote
 PORT file when the source no longer specifies one. Status reports port drift.
 The bootstrap registry is locked while the snapshot and operation run; direct
 manual edits to repository files are outside that lock.
+
+## Multiple deployment services in one source folder
+
+An optional `services/<folder>/remote-services` file replaces that folder's default
+single-service entry. Each line contains `deployment-name:PORT_VARIABLE`, or
+`deployment-name:-` for a service without a listening port. Blank lines and lines
+starting with `#` are allowed. For example, keep both implementations in
+`services/tgr/` and declare:
+
+```text
+tgr:PORT
+tgr-consumer:-
+```
+
+This creates independent `tgr` and `tgr-consumer` deployment services. Each has its
+own runtime/deployment/log accounts, s6 supervision, environment, logs, releases
+and current release selection. The source folder is not an additional deployment
+service unless listed. Folders without this file retain the original behavior.
+`bootstrap service add tgr --type=nodejs --support=http --support=python` generates
+these declarations, a Node `run` launcher and a Python `run-consumer` launcher.
+Existing folders can opt in by adding the declaration file themselves.
+
+Port variables are read from the source folder's `env-dir`/`env-dev`, using the
+same user/default selection described above. An explicit variable must resolve
+to a nonempty valid port; its value is installed as the deployed service's `PORT`.
+Use `-` to skip port lookup entirely. Additional HTTP processes can reference
+other variables such as `METRICS_PORT`. Remote does not allocate those ports.
+Names must be unique across the entire repository, including implicit folder
+names. The existing lowercase Unix account naming and 27-character combined
+`<repo>-<service>` limit apply. Invalid declarations, duplicate names and duplicate
+ports anywhere in the inventory fail before SSH, even for single-service commands.
+Declaration files must be regular files, not symlinks, and contain at least one service.
+
+Package separate artifacts from the same source folder:
+
+```text
+.release/build-001/
+    tgr/
+        run                 # copied from services/tgr/run
+        index.js
+        ...                 # Node runtime files and production dependencies
+    tgr-consumer/
+        run                 # copied from services/tgr/run-consumer
+        cli/
+            consumer.py
+            fsqueue.py
+            requirements.txt
+```
+
+The worker launcher expects `cli/.venv/bin/python3` in its artifact after host
+preparation. Create that environment and install dependencies on the host using
+an application-owned `bin/deploy-prepare` hook; do not copy the local virtual
+environment. Adapt the launcher to the real consumer entrypoint when adopting an
+existing service, such as TGR's `cli/tgr_tag.py --consumer`. Both launchers inherit
+the host environment and stay in the foreground; they do not load development
+`env-dir` files. Packaging and dependency preparation remain application-owned.
+
+```sh
+remote setup all my-repo
+remote deploy my-repo .release/build-001
+# Deploy only the consumer without switching or restarting the API:
+remote deploy my-repo tgr-consumer .release/build-001/tgr-consumer
+remote setup service my-repo tgr-consumer
+remote status my-repo
+remote releases my-repo
+```
+
+For filesystem queues, application host setup must give both runtime accounts
+access to a shared, persistent queue directory, and configure the same `QUEUE_DIR`
+in both host environments. Their private `data/` directories are separate.
+Consumers sharing a GPU also need access to the same `GPU_LOCK_PATH` file.
+Remote still copies only PORT; queue paths, shared group/ACL permissions, model
+caches and other environment values are application configuration. Reuse the
+existing API deployment name when adding a consumer to preserve its host identity.
+Removing or renaming a declaration does not delete the old host service.
 
 ## Layout and runtime contract
 

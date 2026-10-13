@@ -30,8 +30,7 @@ footer { display: flex; justify-content: space-between; gap: 16px; color: #71807
 @media (max-width: 640px) { main { padding: 0 18px; } header { height: 76px; } .panel-heading, th, td { padding: 18px; } footer { flex-direction: column; } }
 header + .workspace,
 header + .success,
-header + .error,
-header + .form-panel { margin-top: 28px; }
+header + .error { margin-top: 28px; }
 .primary { color: white; background: #286449; border-color: #286449; }
 .primary:hover { background: #1d4f38; }
 .workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 32px; align-items: start; }
@@ -63,9 +62,10 @@ header + .form-panel { margin-top: 28px; }
 .resources .badge { white-space: nowrap; }
 .resources time { font-size: 11px; color: #62706a; }
 .empty { color: #62706a; font-size: 13px; line-height: 1.6; }
-.form-panel { margin-bottom: 28px; }
-.form-panel form { padding: 0 28px 26px; }
-.form-panel .eyebrow { margin: 0 0 8px; }
+.inline-form { border-top: 1px solid #e8ede7; padding: 18px 24px 22px; display: grid; gap: 16px; }
+.inline-form-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.inline-form-heading h3 { margin: 0; }
+.repo-list .inline-form { padding: 14px 16px 16px; }
 fieldset { padding: 0; border: 0; margin: 0; display: grid; gap: 20px; }
 fieldset > label { display: grid; gap: 9px; font-size: 13px; font-weight: 600; max-width: 640px; }
 input:not([type=checkbox]), select { width: 100%; border: 1px solid #cad6cd; background: #fff; border-radius: 6px; padding: 12px; font: 14px system-ui, sans-serif; color: #202a29; }

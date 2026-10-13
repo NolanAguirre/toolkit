@@ -3,6 +3,7 @@
 ## setup - Prepare a registered repository on its SSH host.
 ## Usage: remote setup users|directories|supervision|all <repo>
 ## Usage: remote setup service <repo> <service|--all>
+## services/<folder>/remote-services may declare multiple deployment services (name:PORT or name:-).
 ## Individual steps require their prerequisites; all runs them in order.
 ## Requires Linux or FreeBSD, root via sudo -n and s6 on the host.
 ## Reuse an existing s6 scanner or start it with Linux systemd / FreeBSD rc.d.

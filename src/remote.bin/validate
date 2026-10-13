@@ -164,47 +164,95 @@ remote_token "$env_user" || remote_error 'ENV_USER must be a simple directory na
 for directory in "$root"/services/*; do
     [ -d "$directory" ] || continue
     [ ! -L "$directory" ] || remote_error "service symlinks are not supported: $directory"
-    service=${directory##*/}
-    remote_token "$service" || remote_error "invalid service name: $service"
-    if [ "$selected" != --all ] && [ "$selected" != "$service" ]; then
-        continue
+    declarations="$directory/remote-services"
+    explicit=0
+    if [ -e "$declarations" ] || [ -L "$declarations" ]; then
+        [ -f "$declarations" ] && [ ! -L "$declarations" ] || remote_error "remote-services must be a regular file: $declarations"
+        explicit=1
     fi
-    unit="$REMOTE_REPO-$service"
-    case "$unit" in
-        [!a-z_]*|*[!a-z0-9_-]*)
-            remote_error 'remote repo and service names must form a lowercase Unix account name'
-            ;;
-    esac
-    [ "${#unit}" -le 27 ] || remote_error 'repo-service must be at most 27 characters (including the hyphen)'
-    port=-
-    for environment in "$directory"/env-*; do
-        case "${environment##*/}" in
-            env-dir|env-dev)
-                ;;
-            *)
-                continue
-                ;;
-        esac
-        file="$environment/$env_user/PORT"
-        [ -e "$file" ] || file="$environment/default/PORT"
-        [ -e "$file" ] || continue
-        value=$(cat "$file")
-        [ -n "$value" ] || continue
-        [ "$port" = - ] || remote_error "multiple PORT sources for $service"
-        case "$value" in
-            *[!0-9]*|'')
-                remote_error "invalid PORT for $service"
-                ;;
-        esac
-        [ "${#value}" -le 5 ] && [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || remote_error "invalid PORT for $service"
-        port=$(printf '%s' "$value" | sed 's/^0*//')
-    done
-    printf '%s:%s\n' "$service" "$port" >> "$REMOTE_MANIFEST"
+    # Expand source folders into deployment identities before selecting one.
+    if [ "$explicit" = 1 ]; then
+        definitions=$(cat "$declarations")
+    else
+        definitions="${directory##*/}:PORT"
+    fi
+    printf '%s\n' "$definitions" | (
+        count=0
+        while IFS= read -r entry || [ -n "$entry" ]; do
+            case "$entry" in
+                ''|\#*)
+                    continue
+                    ;;
+                *:*)
+                    service=${entry%%:*}
+                    port_key=${entry#*:}
+                    ;;
+                *)
+                    remote_error "expected service:PORT_VARIABLE or service:- in $declarations"
+                    ;;
+            esac
+            remote_token "$service" || remote_error "invalid service name: $service"
+            unit="$REMOTE_REPO-$service"
+            case "$unit" in
+                [!a-z_]*|*[!a-z0-9_-]*)
+                    remote_error 'remote repo and service names must form a lowercase Unix account name'
+                    ;;
+            esac
+            [ "${#unit}" -le 27 ] || remote_error 'repo-service must be at most 27 characters (including the hyphen)'
+            case "$port_key" in
+                -)
+                    ;;
+                ''|[!A-Z_]*|*[!A-Z0-9_]*)
+                    remote_error "invalid port variable for $service: $port_key"
+                    ;;
+            esac
+            port=-
+            if [ "$port_key" != - ]; then
+                for environment in "$directory"/env-*; do
+                    case "${environment##*/}" in
+                        env-dir|env-dev)
+                            ;;
+                        *)
+                            continue
+                            ;;
+                    esac
+                    file="$environment/$env_user/$port_key"
+                    [ -e "$file" ] || file="$environment/default/$port_key"
+                    [ -e "$file" ] || continue
+                    value=$(cat "$file")
+                    [ -n "$value" ] || continue
+                    [ "$port" = - ] || remote_error "multiple $port_key sources for $service"
+                    case "$value" in
+                        *[!0-9]*|'')
+                            remote_error "invalid $port_key for $service"
+                            ;;
+                    esac
+                    [ "${#value}" -le 5 ] && [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || remote_error "invalid $port_key for $service"
+                    port=$(printf '%s' "$value" | sed 's/^0*//')
+                done
+                if [ "$explicit" = 1 ] && [ "$port" = - ]; then
+                    remote_error "missing $port_key for $service; use $service:- for a service without a port"
+                fi
+            fi
+            printf '%s:%s\n' "$service" "$port"
+            count=$((count + 1))
+        done
+        [ "$count" -gt 0 ] || remote_error "no services in $declarations"
+    ) >> "$REMOTE_MANIFEST"
 done
-[ -s "$REMOTE_MANIFEST" ] || remote_error 'no matching services in repository'
+if ! awk -F: '{ if (seen[$1]++) exit 1 }' "$REMOTE_MANIFEST"; then
+    remote_error 'services have duplicate deployment names'
+fi
 if ! awk -F: '$2 != "-" { if (seen[$2]++) exit 1 }' "$REMOTE_MANIFEST"; then
     remote_error 'services have duplicate ports'
 fi
+if [ "$selected" != --all ]; then
+    entries=$(awk -F: -v selected="$selected" '$1 == selected' "$REMOTE_MANIFEST")
+    [ -n "$entries" ] || remote_error 'no matching services in repository'
+    printf '%s\n' "$entries" > "$REMOTE_MANIFEST"
+fi
+[ -s "$REMOTE_MANIFEST" ] || remote_error 'no matching services in repository'
+
 export REMOTE_TARGET REMOTE_USER REMOTE_PORT REMOTE_IDENTITY REMOTE_MANIFEST
 # Keep the locks and cleanup trap in this parent until SSH and all children exit.
 "$command" "$@"

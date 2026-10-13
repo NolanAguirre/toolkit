@@ -535,6 +535,64 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     assert not (bsd/'etc/systemd').exists()
     remote('deploy', 'demo', 'api', str(release/'api'), extra=bsd_env)
     assert (bsd/'var/service-dir/demo-api/server/current/run').is_file()
+    # One source directory can declare independently deployed API and consumer services.
+    declarations = repo/'services/api/remote-services'
+    declarations.write_text('# deployment name:port variable\napi:PORT\n\napi-consumer:-')
+    remote('setup', 'all', 'demo')
+    worker = base('api-consumer')
+    assert (api/'env/PORT').read_text() == '8002\n'
+    assert not (worker/'env/PORT').exists()
+    assert (worker/'run').is_file()
+    assert (host/'var/service/demo-api-consumer').resolve() == worker
+    assert 'api-consumer\t' in remote('status', 'demo')
+    assert 'api-consumer\t' in remote('releases', 'demo')
+    assert not (repo/'services/api-consumer').exists()
+    worker_artifact = release/'api-consumer'
+    worker_artifact.mkdir()
+    (worker_artifact/'run').write_text('#!/bin/sh\nexec sleep 1000\n')
+    (worker_artifact/'run').chmod(0o755)
+    api_before = current.resolve()
+    restarts_before = (host/'restarts').read_text()
+    remote('deploy', 'demo', 'api-consumer', str(worker_artifact))
+    assert current.resolve() == api_before
+    assert (worker/'server/current/run').is_file()
+    assert (host/'restarts').read_text() == restarts_before + str(worker) + '\n'
+    # Bundles include both declared identities, and missing artifacts fail before SSH.
+    (worker_artifact/'run').chmod(0o644)
+    calls_before = (host/'ssh-calls').read_bytes()
+    remote('deploy', 'demo', str(release), ok=False)
+    assert (host/'ssh-calls').read_bytes() == calls_before
+    (worker_artifact/'run').chmod(0o755)
+    remote('deploy', 'demo', str(release))
+    # Explicit port variables use the normal user/default lookup, delivered as PORT.
+    (repo/'services/api/env-dir/default/METRICS_PORT').write_text('8010\n')
+    declarations.write_text('api:PORT\napi-consumer:METRICS_PORT\n')
+    remote('setup', 'service', 'demo', 'api-consumer')
+    assert (worker/'env/PORT').read_text() == '8010\n'
+    declarations.write_text('api:PORT\napi-consumer:-\n')
+    remote('setup', 'service', 'demo', 'api-consumer')
+    assert not (worker/'env/PORT').exists()
+    # Validate the full inventory, including collisions outside a selected service.
+    calls_before = (host/'ssh-calls').read_bytes()
+    for invalid in ('', '# empty\n', 'api', 'api:PORT:extra', '../api:-',
+                    'api:../../PORT', 'api:missing', 'api:MISSING',
+                    'api:PORT\napi:PORT\n', 'api:PORT\ndns:-\n',
+                    'api:PORT\napi-consumer:PORT\n', 'api:PORT\nx;bad:-\n',
+                    'api:PORT\n' + 'x' * 30 + ':-\n'):
+        declarations.write_text(invalid)
+        remote('setup', 'all', 'demo', ok=False)
+        remote('deploy', 'demo', 'dns', str(release/'dns'), ok=False)
+        assert (host/'ssh-calls').read_bytes() == calls_before
+    declarations.unlink()
+    declarations.symlink_to(root/'victim')
+    remote('setup', 'all', 'demo', ok=False)
+    assert (host/'ssh-calls').read_bytes() == calls_before
+    declarations.unlink()
+    declarations.mkdir()
+    remote('setup', 'all', 'demo', ok=False)
+    declarations.rmdir()
+    declarations.write_text('api:PORT\napi-consumer:-\n')
+    assert not list((root/'state/remote').glob('.services.*'))
     # Local creation races have one winner and retain a usable lock inode.
     remote('rm', 'demo')
     lock = root/'state/remote/lock'

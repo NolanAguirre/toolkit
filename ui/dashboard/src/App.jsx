@@ -55,10 +55,9 @@ function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose
     setBusy(false)
   }
 
-  return <DevScope id="s5d2f6g" state={{ kind, busy, created, error: Boolean(error) }}><section className="panel form-panel" aria-labelledby="form-title">
-    <div className="panel-heading"><div><p className="eyebrow">{repo && !['create', 'import'].includes(kind) ? repo.name : 'WORKSPACE'}</p><h2 id="form-title">{labels[kind]}</h2></div><button type="button" disabled={busy} onClick={onClose}>Cancel</button></div>
-    <form onSubmit={submit}>
-      <fieldset disabled={busy || created}>
+  return <DevScope id="s5d2f6g" state={{ kind, busy, created, error: Boolean(error) }}><form className="inline-form" onSubmit={submit} aria-labelledby="form-title">
+    <div className="inline-form-heading"><h3 id="form-title">{labels[kind]}</h3><button type="button" disabled={busy} onClick={onClose}>Cancel</button></div>
+    <fieldset disabled={busy || created}>
         {kind !== 'import' && <label>Name<input required autoFocus value={name} onChange={event => setName(event.target.value)} pattern={pattern} maxLength={kind === 'databases' ? 63 : 128} placeholder={kind === 'create' ? 'my-project' : kind === 'services' ? 'api' : kind === 'uis' ? 'dashboard' : 'app'} /></label>}
         {['create', 'import'].includes(kind) && <label>{kind === 'create' ? 'Parent directory' : 'Existing repository path'}<input required autoFocus={kind === 'import'} value={directory} onChange={event => setDirectory(event.target.value)} placeholder="/home/you/projects/my-project" pattern="/.*" /><span className="hint">{kind === 'create' ? `Creates a new directory${name ? ` named ${name}` : ''} here using your shared ~/.s6craft rules.` : 'Must contain a services/ directory. Existing files are preserved; ports are discovered and registered.'}</span></label>}
         {kind === 'databases' && <label>Database backend<select value={engine} onChange={event => setEngine(event.target.value)}><option value="sqlite">SQLite</option><option value="postgres">PostgreSQL</option></select><span className="hint">Creates a Sqitch scaffold and registers it. Does not run migrations.</span></label>}
@@ -66,15 +65,15 @@ function CreateForm({ kind, repo, parentPath, busy, setBusy, onComplete, onClose
         {kind === 'services' && <p className="hint">Creates the Node.js package and environment files. Add application code before starting it. Database support requires a database with this service’s name.</p>}
         {kind === 'uis' && <p className="hint">Creates a React/Vite app. Component library support requires component-library/ in this repo. Install dependencies after scaffolding.</p>}
         <button className="primary" type="submit">{busy ? 'Working…' : labels[kind]}</button>
-      </fieldset>
-      {error && <div className="form-error" role="alert"><p>{error}</p><span className="hint">Check the repository before retrying if bootstrap reports partial work.</span></div>}
-    </form>
-  </section></DevScope>
+    </fieldset>
+    {error && <div className="form-error" role="alert"><p>{error}</p><span className="hint">Check the repository before retrying if bootstrap reports partial work.</span></div>}
+  </form></DevScope>
 }
 
-function ResourceList({ title, items, kind, onAdd, busy, devId }) {
+function ResourceList({ title, items, kind, onAdd, busy, devId, children }) {
   return <DevScope id={devId} state={{ kind, count: items.length }}><section className="panel resource-panel">
     <div className="panel-heading"><h2>{title} <span className="count">{items.length}</span></h2><button aria-label={labels[kind]} disabled={busy} onClick={() => onAdd(kind)}>+ Add</button></div>
+    {children}
     {items.length === 0 ? <p className="empty">No {title.toLowerCase()} yet.</p> : <ul className="resources">{items.map(item => <li key={item.name}><div><strong>{item.name}</strong><span className="path">{item.path}</span></div>{item.port && <span className="badge">Port {item.port}</span>}</li>)}</ul>}
   </section></DevScope>
 }
@@ -266,13 +265,14 @@ export default function App() {
   }
 
   const repo = repos.find(repo => repo.name === selected)
+  const createForm = form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
     <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><span className="local">Local workspace</span></header></DevScope>
     {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
     {error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
-    {form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />}
     <div className="workspace">
       <DevScope id="z8x3c7v" state={{ count: repos.length, selected }}><aside className="panel repo-list" aria-label="Repositories"><div className="panel-heading"><h2>Repositories <span className="count">{repos.length}</span></h2><button disabled={busy || loading} onClick={() => refresh()} aria-label="Refresh repositories">↻</button></div><div className="repo-actions"><button disabled={busy || loading} onClick={() => setForm('import')}>Import repo</button><button className="primary" disabled={busy || loading} onClick={() => setForm('create')}>+ New repo</button></div>
+        {(form === 'create' || form === 'import') && createForm}
         {loading && <p className="empty">Refreshing…</p>}
         {!loading && !repos.length && <p className="empty">Create or import your first repository.</p>}
         {repos.map(item => <button key={item.name} className={`repo-choice ${selected === item.name ? 'active' : ''}`} aria-pressed={selected === item.name} disabled={busy} onClick={() => { setSelected(item.name); setForm(null); setError(''); setNotice('') }}><span>{item.name}</span>{item.current && <span className="selection-dot" title="Current bootstrap selection" aria-label="Current bootstrap selection" />}</button>)}
@@ -281,7 +281,7 @@ export default function App() {
         {repo ? <>
           <DevScope id="p8a3s7d" state={{ name: repo.name, current: Boolean(repo.current) }}><div className="repo-heading"><div><h2>{repo.name}</h2><p className="path">{repo.path}</p></div>{repo.current ? <span className="badge">Current in bootstrap</span> : <button disabled={busy} onClick={selectCurrent}>Set current</button>}</div></DevScope>
           <DevScope id="f1g5h9j" state={{ view }}><nav className="tabs" aria-label="Repository view"><button disabled={busy} className={view === 'resources' ? 'active' : ''} aria-pressed={view === 'resources'} onClick={() => { setView('resources'); setError('') }}>Services & UIs</button><button disabled={busy} className={view === 'deployments' ? 'active' : ''} aria-pressed={view === 'deployments'} onClick={() => { setView('deployments'); setForm(null); setError('') }}>Deployments</button></nav></DevScope>
-          {view === 'resources' ? detail ? <div className="resource-stack"><ResourceList devId="t4y8u2i" title="Services" kind="services" items={detail.services} onAdd={setForm} busy={busy} /><ResourceList devId="n4p7q2w" title="UIs" kind="uis" items={detail.uis} onAdd={setForm} busy={busy} /><ResourceList devId="h8j3k6m" title="Databases" kind="databases" items={detail.databases} onAdd={setForm} busy={busy} /></div> : <p className="empty">{error ? 'Could not load this repository.' : 'Loading repository…'}</p> : deployment ? <DeploymentView key={selected} data={deployment} repo={repo} busy={busy} setBusy={setBusy} /> : <p className="empty">{error ? 'Could not load deployment details.' : 'Loading deployments…'}</p>}
+          {view === 'resources' ? detail ? <div className="resource-stack"><ResourceList devId="t4y8u2i" title="Services" kind="services" items={detail.services} onAdd={setForm} busy={busy}>{form === 'services' && createForm}</ResourceList><ResourceList devId="n4p7q2w" title="UIs" kind="uis" items={detail.uis} onAdd={setForm} busy={busy}>{form === 'uis' && createForm}</ResourceList><ResourceList devId="h8j3k6m" title="Databases" kind="databases" items={detail.databases} onAdd={setForm} busy={busy}>{form === 'databases' && createForm}</ResourceList></div> : <p className="empty">{error ? 'Could not load this repository.' : 'Loading repository…'}</p> : deployment ? <DeploymentView key={selected} data={deployment} repo={repo} busy={busy} setBusy={setBusy} /> : <p className="empty">{error ? 'Could not load deployment details.' : 'Loading deployments…'}</p>}
         </> : <section className="panel empty">Select a repository to view its services, UIs, and deployments.</section>}
       </div></DevScope>
     </div>

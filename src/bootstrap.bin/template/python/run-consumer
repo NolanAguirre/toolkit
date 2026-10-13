@@ -1,0 +1,5 @@
+#!/bin/sh
+# Package this launcher as run alongside cli/ and its host-installed environment.
+set -e
+cd "$(dirname "$0")"
+exec cli/.venv/bin/python3 cli/consumer.py

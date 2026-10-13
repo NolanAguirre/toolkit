@@ -21,6 +21,8 @@ help:
 # Implement build/package and each host action as small application-owned scripts.
 # Copy files.sh, remote-host.sh and .host/validate from the toolkit when scaffolding.
 # Package ../.release/<release>/<service>/run plus each service's runtime files.
+# A source folder's remote-services may declare several deployment names.
+# Package each separately; copy run-consumer as the worker artifact's run.
 # Remote calls the generated /var/service-dir/<repo>-<service>/bin/deploy commands.
 # Host maintenance targets below are explicit app operations, not invoked by remote deploy.
 build:

@@ -7,6 +7,9 @@
 ## Include a simple Makefile with help, install, build and background start targets.
 ## python: add cli/fsqueue.py, a stub cli/consumer.py, cli/requirements.txt and .gitignore;
 ## the Makefile gains install.python (cli/.venv) and a foreground consumer target.
+## Add remote-services declaring <name> and <name>-consumer as independent deployments.
+## run and run-consumer are foreground launchers; package each as its artifact's run.
+## Only the primary deployment inherits PORT when http support is selected.
 ## Write QUEUE_DIR=/tmp/<domain>/queues/<name> and GPU_LOCK_PATH (default /tmp/gpu.lock,
 ## overridable from the invoking shell to share one lock). Requires python3.
 ## Existing service paths are rejected.
@@ -196,6 +199,14 @@ if [ "$python" = 1 ]; then
     mkdir -p -- "$pending/$name/cli"
     cp -- "$template/python/fsqueue.py" "$template/python/consumer.py" "$template/python/requirements.txt" "$pending/$name/cli/"
     cp -- "$template/python/gitignore" "$pending/$name/.gitignore"
+    cp -- "$template/python/run" "$pending/$name/run"
+    cp -- "$template/python/run-consumer" "$pending/$name/run-consumer"
+    chmod 755 "$pending/$name/run" "$pending/$name/run-consumer"
+    port_key=-
+    if [ "$http" = 1 ]; then
+        port_key=PORT
+    fi
+    printf '%s:%s\n%s-consumer:-\n' "$name" "$port_key" "$name" > "$pending/$name/remote-services"
 fi
 cat "$template/makefile/$makefile" > "$pending/$name/Makefile"
 if [ "$http" = 1 ]; then
