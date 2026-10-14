@@ -41,6 +41,21 @@ const optionDevIds = {
   'component-library': 'u1i6o9s',
 }
 const labels = { create: 'New repository', import: 'Import repository', services: 'Add service', uis: 'Add React UI', databases: 'Add database' }
+const themeStorageKey = 'toolkit-dashboard-theme'
+
+const storedTheme = () => {
+  try {
+    return localStorage.getItem(themeStorageKey)
+  } catch {
+    return null
+  }
+}
+
+const initialDark = () => {
+  const stored = storedTheme()
+  if (stored === 'dark' || stored === 'light') return stored === 'dark'
+  return document.documentElement.dataset.theme === 'dark' || matchMedia('(prefers-color-scheme: dark)').matches
+}
 
 function CreateForm({ kind, repo, parentPath, serviceTypes, busy, setBusy, onComplete, onClose }) {
   const [name, setName] = useState('')
@@ -250,6 +265,19 @@ export default function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [revision, setRevision] = useState(0)
+  const [dark, setDark] = useState(initialDark)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+  }, [dark])
+
+  const toggleDark = () => {
+    const next = !dark
+    try {
+      localStorage.setItem(themeStorageKey, next ? 'dark' : 'light')
+    } catch {}
+    setDark(next)
+  }
 
   async function refresh(preferred) {
     setError('')
@@ -306,7 +334,7 @@ export default function App() {
   const repo = repos.find(repo => repo.name === selected)
   const createForm = form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} serviceTypes={serviceTypes} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
-    <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><span className="local">Local workspace</span></header></DevScope>
+    <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><div className="header-actions"><span className="local">Local workspace</span><DevScope id="m6d2k8n" state={{ dark }}><button type="button" className="theme-toggle" aria-pressed={dark} onClick={toggleDark}>Dark mode</button></DevScope></div></header></DevScope>
     {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
     {error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
     <div className="workspace">
