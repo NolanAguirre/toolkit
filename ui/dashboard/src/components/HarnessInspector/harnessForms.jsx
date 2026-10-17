@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useFormReady } from 'component-library'
 
 export const BASE = import.meta.env.VITE_HARNESS_API_BASE || '/dashboard/harness-api'
@@ -28,10 +28,33 @@ export const HarnessFields = ({ form, inspector }) => {
   const [error, setError] = useState(null)
   const [attempt, setAttempt] = useState(0)
   const promptDefault = inspector?.descriptor?.leaf ? `for ${inspector.descriptor.leaf} ` : ''
+  const previousPrefix = useRef(promptDefault)
   const setDefault = form.setDefault
+  const prompt = form.values.prompt
+  const promptDirty = form.dirty?.prompt
   useEffect(() => {
     setDefault('prompt', promptDefault)
-  }, [promptDefault, setDefault])
+    if (promptDirty && prompt === previousPrefix.current && prompt !== promptDefault)
+      setValue('prompt', promptDefault)
+    previousPrefix.current = promptDefault
+  }, [promptDefault, prompt, promptDirty, setDefault, setValue])
+  const handledResponse = useRef(false)
+  const [suppressPromptError, setSuppressPromptError] = useState(false)
+  const promptDefaultRef = useRef(promptDefault)
+  promptDefaultRef.current = promptDefault
+  const hasResponse = form.hasResponse
+  // A successful send restores the component prefix and leaves the other fields alone.
+  useLayoutEffect(() => {
+    if (!hasResponse) {
+      handledResponse.current = false
+      setSuppressPromptError(false)
+      return
+    }
+    if (handledResponse.current) return
+    handledResponse.current = true
+    setSuppressPromptError(true)
+    setValue('prompt', promptDefaultRef.current)
+  }, [hasResponse, setValue])
   useFormReady(form, 'component', loaded && Boolean(provider?.implemented && !provider.error))
   useEffect(() => {
     let cancelled = false
@@ -100,8 +123,12 @@ export const HarnessFields = ({ form, inspector }) => {
     </select>
     <label className="form__label" htmlFor="harness-prompt">Prompt</label>
     <textarea id="harness-prompt" className="form__textarea" rows={5} value={form.values.prompt}
-      disabled={form.isSubmitting} onChange={event => form.setValue('prompt', event.target.value)} />
+      disabled={form.isSubmitting} onChange={event => {
+        setSuppressPromptError(false)
+        form.setValue('prompt', event.target.value)
+      }} />
     {Object.entries(form.errors).map(([name, error]) => form.touched[name] && error
+      && !(suppressPromptError && name === 'prompt')
       ? <p key={name} role="alert">{error}</p> : null)}
   </>
 }
