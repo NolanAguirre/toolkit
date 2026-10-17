@@ -7,6 +7,7 @@
 ## Create env-dir/default and env-dir/$USER, plus install/build/start Make targets.
 ## component-library: link the existing root library; use src/index.js in development
 ## and built dist in production. Requires its package.json and Makefile.
+## Link component-library to ../component-library when it is missing.
 ## Requires npm and port. Install dependencies separately with make install.
 ## Reject existing paths. Clean up failed staging; retain any reserved port.
 ## Print the created path. --support also accepts a separate value.
@@ -57,6 +58,9 @@ if [ -e "$path" ] || [ -L "$path" ]; then
     bootstrap_error "path already exists: $path"
 fi
 if [ "$library" = 1 ]; then
+    if [ ! -e "$root/component-library" ] && [ ! -L "$root/component-library" ] && [ -d "$root/../component-library" ]; then
+        ln -s -- ../component-library "$root/component-library"
+    fi
     if [ ! -f "$root/component-library/package.json" ] || [ ! -f "$root/component-library/src/index.js" ] || [ ! -f "$root/component-library/Makefile" ]; then
         bootstrap_error 'component-library support requires component-library/{package.json,src/index.js,Makefile} at the repository root'
     fi
