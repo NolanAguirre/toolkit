@@ -9,7 +9,8 @@
 ## and built dist in production. Requires its package.json and Makefile.
 ## Link component-library to ../component-library when it is missing.
 ## Requires npm and port. Install dependencies separately with make install.
-## Reject existing paths. Clean up failed staging; retain any reserved port.
+## Replace an existing path holding only empty directories; reject any other.
+## Clean up failed staging; retain any reserved port.
 ## Print the created path. --support also accepts a separate value.
 ##</help>
 set -e
@@ -54,6 +55,9 @@ root=$(pwd -P)
 domain=${root##*/}
 bootstrap_name "$domain"
 path="$root/ui/$name"
+if [ -d "$path" ] && [ ! -L "$path" ] && [ -z "$(find "$path" ! -type d -print)" ]; then
+    find "$path" -depth -type d -exec rmdir -- {} \;
+fi
 if [ -e "$path" ] || [ -L "$path" ]; then
     bootstrap_error "path already exists: $path"
 fi
