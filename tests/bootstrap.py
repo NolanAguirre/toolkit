@@ -17,6 +17,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if file.is_file():
             file.chmod(0o755)
     env = dict(os.environ, UTIL_PATH=str(root/'state'), HOME=str(root/'home'),
+               CODEX_HOME=str(root/'home/.codex'),
                USER='tester', ENV_USER='tester', TOOLKIT_HIST_LOCK='1',
                PATH=str(installed) + ':' + os.environ['PATH'])
 
@@ -73,6 +74,17 @@ with tempfile.TemporaryDirectory() as tmp:
     assert (existing/'.claude/rules/general.md').resolve() == shared/'.claude/rules/general.md'
     assert (existing/'ui/CODEX.md').resolve() == shared/'ui/CODEX.md'
     assert not (existing/'db').exists()
+    codex_config = root/'home/.codex/config.toml'
+    assert codex_config.read_text() == 'project_doc_fallback_filenames = ["CODEX.md"]\n'
+    codex_config.write_text('model = "x"\n\n[projects."/tmp"]\ntrust_level = "trusted"\n')
+    call('bootstrap', 'repo', 'import', str(existing))
+    assert codex_config.read_text() == ('project_doc_fallback_filenames = ["CODEX.md"]\nmodel = "x"\n\n'
+                                        '[projects."/tmp"]\ntrust_level = "trusted"\n')
+    call('bootstrap', 'repo', 'import', str(existing))
+    assert codex_config.read_text().count('project_doc_fallback_filenames') == 1
+    codex_config.write_text('project_doc_fallback_filenames = ["OTHER.md"]\n')
+    call('bootstrap', 'repo', 'import', str(existing), ok=False)
+    codex_config.write_text('project_doc_fallback_filenames = ["OTHER.md", "CODEX.md"]\n')
     assert (existing/'.cursorignore').resolve() == shared/'.cursorignore'
     assert (existing/'.cursorrules').resolve() == shared/'.cursorrules'
     assert (existing/'.cursor/rules/general.mdc').resolve() == shared/'.cursor/rules/general.mdc'

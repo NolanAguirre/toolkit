@@ -10,6 +10,26 @@ bootstrap_link_missing() {
     fi
 }
 
+bootstrap_codex_config_write() {
+    printf '%s\n' 'project_doc_fallback_filenames = ["CODEX.md"]'
+    if [ -f "$1" ]; then
+        cat -- "$1"
+    fi
+}
+
+# Codex only reads CODEX.md through this top-level key; prepending keeps it outside any table.
+bootstrap_codex_config() {
+    codex_config="${CODEX_HOME:-$HOME/.codex}/config.toml"
+    if [ -f "$codex_config" ] && grep -q '^project_doc_fallback_filenames' "$codex_config"; then
+        if ! grep -q '^project_doc_fallback_filenames.*"CODEX\.md"' "$codex_config"; then
+            bootstrap_error "add \"CODEX.md\" to project_doc_fallback_filenames in $codex_config"
+        fi
+        return 0
+    fi
+    mkdir -p -- "${codex_config%/*}"
+    atomic_write "$codex_config" bootstrap_codex_config_write "$codex_config"
+}
+
 bootstrap_name() {
     # grep -z checks the whole argument, including any embedded newlines.
     if [ "$1" = ports ] || ! printf '%s' "$1" | grep -zq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then

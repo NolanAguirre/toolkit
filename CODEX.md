@@ -1,1 +1,1 @@
-/home/nolan/.s6craft/CODEX.md
+.cursor/rules/toolkit-conventions.mdc

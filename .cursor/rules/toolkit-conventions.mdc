@@ -1,9 +1,14 @@
+---
+description: Toolkit shell conventions
+alwaysApply: true
+---
+
 # Toolkit conventions
 
 These rules apply throughout this repository.
 
-Also read [shared repository instructions](AGENTS.shared.md). The toolkit-specific
-conventions below remain in effect.
+Codex: also read the shared repository instructions in the repository-root
+`CODEX.shared.md`. The toolkit-specific conventions below remain in effect.
 
 ## Purpose and implementation
 

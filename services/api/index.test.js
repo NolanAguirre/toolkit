@@ -15,7 +15,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
   let server
   t.after(async () => {
     if (server) await new Promise(resolve => server.close(resolve))
-    for (const key of ['UTIL_PATH', 'TOOLKIT_HIST_LOCK', 'PATH', 'HOME', 'USER', 'ENV_USER']) {
+    for (const key of ['UTIL_PATH', 'TOOLKIT_HIST_LOCK', 'PATH', 'HOME', 'CODEX_HOME', 'USER', 'ENV_USER']) {
       if (original[key] === undefined) delete process.env[key]
       else process.env[key] = original[key]
     }
@@ -26,7 +26,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
   for (const entry of readdirSync(installed, { recursive: true, withFileTypes: true })) {
     if (entry.isFile()) chmodSync(path.join(entry.parentPath, entry.name), 0o755)
   }
-  Object.assign(process.env, { UTIL_PATH: path.join(directory, 'state'), TOOLKIT_HIST_LOCK: '1', PATH: `${installed}:${original.PATH}`, HOME: path.join(directory, 'home'), USER: 'tester', ENV_USER: 'tester' })
+  Object.assign(process.env, { UTIL_PATH: path.join(directory, 'state'), TOOLKIT_HIST_LOCK: '1', PATH: `${installed}:${original.PATH}`, HOME: path.join(directory, 'home'), CODEX_HOME: path.join(directory, 'home/.codex'), USER: 'tester', ENV_USER: 'tester' })
   const rules = path.join(process.env.HOME, '.s6craft')
   mkdirSync(path.join(rules, '.cursor/rules'), { recursive: true })
   mkdirSync(path.join(rules, '.claude/rules'), { recursive: true })

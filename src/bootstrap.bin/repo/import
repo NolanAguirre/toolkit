@@ -7,6 +7,7 @@
 ## Preserve repository files and reuse existing port domains and reservations.
 ## Add missing CLAUDE.md, CODEX.md, .cursorignore, .cursorrules, Claude rule and Cursor rule/skill
 ## links from ~/.s6craft. Link each ~/.s6craft/<dir>/CODEX.md when the repository has <dir>.
+## Add project_doc_fallback_filenames = ["CODEX.md"] to ${CODEX_HOME:-~/.codex}/config.toml if missing.
 ## Require the same shared rules as repo create. Never replace existing files or links.
 ## Re-import to pick up new shared rules and skills. Cursor and Claude parent directories must be
 ## real directories.
@@ -64,6 +65,7 @@ for existing in "$STATE_DIR"/repos/*/path; do
     fi
 done
 command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+bootstrap_codex_config
 # Domain creation and discovery share the port lock; our parent holds bootstrap's.
 (cd -- "$path" && port allocate discover --create-domain) >&2
 mkdir -p -- "$path/.cursor/rules" "$path/.cursor/skills" "$path/.claude/rules"

@@ -6,6 +6,7 @@
 ## Link every ~/.s6craft/.cursor/rules/*.mdc, including db-schema.mdc scoped to db/**.
 ## Link ~/.s6craft/CLAUDE.md, CODEX.md and every .claude/rules/*.md.
 ## Link each ~/.s6craft/<dir>/CODEX.md when the new repository has <dir>, such as ui and db.
+## Add project_doc_fallback_filenames = ["CODEX.md"] to ${CODEX_HOME:-~/.codex}/config.toml if missing.
 ## Link each skill directory containing SKILL.md from ~/.s6craft/.cursor/skills.
 ## Link ~/.s6craft/.cursorignore to the repository .cursorignore.
 ## Link ~/.s6craft/.cursorrules to the repository .cursorrules.
@@ -71,6 +72,7 @@ if [ ! -f "$cursor_rules" ]; then
     bootstrap_error "missing Cursor rules: $cursor_rules"
 fi
 command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+bootstrap_codex_config
 env_user=${ENV_USER:-${USER:-default}}
 if [ "$nginx" = 1 ] && { [ "$env_user" = . ] || [ "$env_user" = .. ] || printf '%s\n' "$env_user" | grep -q /; }; then
     bootstrap_error 'ENV_USER or USER must be a directory name'
