@@ -5,9 +5,11 @@
 ## Accept absolute or relative paths, including . and ..; store and print the absolute path.
 ## Require a services directory; use the canonical directory basename as the name.
 ## Preserve repository files and reuse existing port domains and reservations.
-## Add missing AGENTS.md, .cursorignore, .cursorrules and Cursor rule/skill links from ~/.s6craft.
+## Add missing CLAUDE.md, CODEX.md, .cursorignore, .cursorrules, Claude rule and Cursor rule/skill
+## links from ~/.s6craft. Link each ~/.s6craft/<dir>/CODEX.md when the repository has <dir>.
 ## Require the same shared rules as repo create. Never replace existing files or links.
-## Re-import to pick up new shared rules and skills. Cursor parent directories must be real directories.
+## Re-import to pick up new shared rules and skills. Cursor and Claude parent directories must be
+## real directories.
 ## Read env-dir/env-dev PORT files using ENV_USER (or USER), then default.
 ## Create a 100-port domain if missing. Services without PORT files need no reservation.
 ## Reject conflicting registrations or ports. Print the imported repository path.
@@ -31,7 +33,7 @@ if [ ! -d "$path/services" ] || [ -L "$path/services" ]; then
     bootstrap_error 'repo pattern requires a services directory (not a symlink)'
 fi
 rules_dir="$HOME/.s6craft"
-if [ ! -d "$rules_dir/.cursor/rules" ] || [ ! -f "$rules_dir/AGENTS.md" ] || [ ! -f "$rules_dir/.cursorignore" ] || [ ! -f "$rules_dir/.cursorrules" ]; then
+if [ ! -d "$rules_dir/.cursor/rules" ] || [ ! -d "$rules_dir/.claude/rules" ] || [ ! -f "$rules_dir/CLAUDE.md" ] || [ ! -f "$rules_dir/CODEX.md" ] || [ ! -f "$rules_dir/.cursorignore" ] || [ ! -f "$rules_dir/.cursorrules" ]; then
     bootstrap_error "missing shared rules in $rules_dir"
 fi
 if [ -L "$path/.cursor" ] || { [ -e "$path/.cursor" ] && [ ! -d "$path/.cursor" ]; }; then
@@ -42,6 +44,12 @@ if [ -L "$path/.cursor/rules" ] || { [ -e "$path/.cursor/rules" ] && [ ! -d "$pa
 fi
 if [ -L "$path/.cursor/skills" ] || { [ -e "$path/.cursor/skills" ] && [ ! -d "$path/.cursor/skills" ]; }; then
     bootstrap_error '.cursor/skills must be a real directory'
+fi
+if [ -L "$path/.claude" ] || { [ -e "$path/.claude" ] && [ ! -d "$path/.claude" ]; }; then
+    bootstrap_error '.claude must be a real directory'
+fi
+if [ -L "$path/.claude/rules" ] || { [ -e "$path/.claude/rules" ] && [ ! -d "$path/.claude/rules" ]; }; then
+    bootstrap_error '.claude/rules must be a real directory'
 fi
 # Check registry conflicts before changing any port state.
 if [ -e "$STATE_DIR/repos/$name" ]; then
@@ -58,12 +66,24 @@ done
 command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
 # Domain creation and discovery share the port lock; our parent holds bootstrap's.
 (cd -- "$path" && port allocate discover --create-domain) >&2
-mkdir -p -- "$path/.cursor/rules" "$path/.cursor/skills"
+mkdir -p -- "$path/.cursor/rules" "$path/.cursor/skills" "$path/.claude/rules"
 for rule in "$rules_dir"/.cursor/rules/*.mdc; do
     [ -f "$rule" ] || continue
     bootstrap_link_missing "$rule" "$path/.cursor/rules/${rule##*/}"
 done
-bootstrap_link_missing "$rules_dir/AGENTS.md" "$path/AGENTS.md"
+for rule in "$rules_dir"/.claude/rules/*.md; do
+    [ -f "$rule" ] || continue
+    bootstrap_link_missing "$rule" "$path/.claude/rules/${rule##*/}"
+done
+bootstrap_link_missing "$rules_dir/CLAUDE.md" "$path/CLAUDE.md"
+bootstrap_link_missing "$rules_dir/CODEX.md" "$path/CODEX.md"
+for codex in "$rules_dir"/*/CODEX.md; do
+    [ -f "$codex" ] || continue
+    dir=${codex%/CODEX.md}
+    dir=${dir##*/}
+    [ -d "$path/$dir" ] || continue
+    bootstrap_link_missing "$codex" "$path/$dir/CODEX.md"
+done
 bootstrap_link_missing "$rules_dir/.cursorignore" "$path/.cursorignore"
 bootstrap_link_missing "$rules_dir/.cursorrules" "$path/.cursorrules"
 for skill in "$rules_dir"/.cursor/skills/*; do

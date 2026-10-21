@@ -44,11 +44,19 @@ with tempfile.TemporaryDirectory() as tmp:
     (shared/'.cursor/rules/general.mdc').write_text('shared rules\n')
     (shared/'.cursor/skills/example').mkdir(parents=True)
     (shared/'.cursor/skills/example/SKILL.md').write_text('shared skill\n')
-    (shared/'AGENTS.md').write_text('shared agents\n')
+    (shared/'.claude/rules').mkdir(parents=True)
+    (shared/'.claude/rules/general.md').write_text('shared claude rule\n')
+    (shared/'CLAUDE.md').write_text('shared claude\n')
+    (shared/'CODEX.md').write_text('shared codex\n')
+    (shared/'ui').mkdir()
+    (shared/'ui/CODEX.md').write_text('ui codex\n')
+    (shared/'db').mkdir()
+    (shared/'db/CODEX.md').write_text('db codex\n')
     (shared/'.cursorignore').write_text('node_modules\n')
     (shared/'.cursorrules').write_text('shared cursor rules\n')
     index = root/'state/ports/allocate/ports'
     existing = repo('existing', 9000)
+    (existing/'ui').mkdir()
     call('port', 'allocate', 'create', 'existing')
     call('port', 'allocate', 'set', 'existing', '9000', '-m', 'custom description')
     before = index.read_bytes()
@@ -59,38 +67,47 @@ with tempfile.TemporaryDirectory() as tmp:
     assert index.read_bytes() == before
     assert metadata.read_bytes() == metadata_before
     assert (root/'state/bootstrap/current_repo').read_text().strip() == 'existing'
-    assert (existing/'AGENTS.md').is_symlink()
-    assert (existing/'AGENTS.md').resolve() == shared/'AGENTS.md'
+    assert (existing/'CLAUDE.md').is_symlink()
+    assert (existing/'CLAUDE.md').resolve() == shared/'CLAUDE.md'
+    assert (existing/'CODEX.md').resolve() == shared/'CODEX.md'
+    assert (existing/'.claude/rules/general.md').resolve() == shared/'.claude/rules/general.md'
+    assert (existing/'ui/CODEX.md').resolve() == shared/'ui/CODEX.md'
+    assert not (existing/'db').exists()
     assert (existing/'.cursorignore').resolve() == shared/'.cursorignore'
     assert (existing/'.cursorrules').resolve() == shared/'.cursorrules'
     assert (existing/'.cursor/rules/general.mdc').resolve() == shared/'.cursor/rules/general.mdc'
     assert (existing/'.cursor/skills/example').resolve() == shared/'.cursor/skills/example'
     # Re-import adds newly shared rules while preserving local files and dangling links.
-    (existing/'AGENTS.md').unlink()
-    (existing/'AGENTS.md').write_text('local instructions\n')
+    (existing/'CLAUDE.md').unlink()
+    (existing/'CLAUDE.md').write_text('local instructions\n')
     (existing/'.cursor/rules/general.mdc').unlink()
     (existing/'.cursor/rules/general.mdc').write_text('local rule\n')
     (existing/'.cursorrules').unlink()
     (existing/'.cursorrules').symlink_to(root/'missing-rules')
     (shared/'.cursor/rules/new.mdc').write_text('new shared rule\n')
     call('bootstrap', 'repo', 'import', str(existing))
-    assert (existing/'AGENTS.md').read_text() == 'local instructions\n'
+    assert (existing/'CLAUDE.md').read_text() == 'local instructions\n'
     assert (existing/'.cursor/rules/general.mdc').read_text() == 'local rule\n'
     assert (existing/'.cursorrules').readlink() == root/'missing-rules'
     assert (existing/'.cursor/rules/new.mdc').resolve() == shared/'.cursor/rules/new.mdc'
     # Reject missing sources and linked parent directories before allocating ports.
     missing_rules = repo('missing-rules')
     before = index.read_bytes()
-    (shared/'AGENTS.md').rename(shared/'saved-agents')
+    (shared/'CODEX.md').rename(shared/'saved-codex')
     call('bootstrap', 'repo', 'import', str(missing_rules), ok=False)
     assert index.read_bytes() == before
     assert not (missing_rules/'.cursor').exists()
-    (shared/'saved-agents').rename(shared/'AGENTS.md')
+    (shared/'saved-codex').rename(shared/'CODEX.md')
     linked_rules = repo('linked-rules')
     (linked_rules/'.cursor').symlink_to(shared/'.cursor', target_is_directory=True)
     call('bootstrap', 'repo', 'import', str(linked_rules), ok=False)
     assert index.read_bytes() == before
     assert not (root/'state/bootstrap/repos/linked-rules').exists()
+    linked_claude = repo('linked-claude')
+    (linked_claude/'.claude').symlink_to(shared/'.claude', target_is_directory=True)
+    call('bootstrap', 'repo', 'import', str(linked_claude), ok=False)
+    assert index.read_bytes() == before
+    assert not (root/'state/bootstrap/repos/linked-claude').exists()
 
     relative = repo('relative')
     assert call('bootstrap', 'repo', 'import', './relative', cwd=root) == str(relative)

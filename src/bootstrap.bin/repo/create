@@ -4,11 +4,13 @@
 ## Usage: bootstrap repo create <name> [--support=nginx]
 ## Requires initialized port toolkit and shared rules in ~/.s6craft.
 ## Link every ~/.s6craft/.cursor/rules/*.mdc, including db-schema.mdc scoped to db/**.
+## Link ~/.s6craft/CLAUDE.md, CODEX.md and every .claude/rules/*.md.
+## Link each ~/.s6craft/<dir>/CODEX.md when the new repository has <dir>, such as ui and db.
 ## Link each skill directory containing SKILL.md from ~/.s6craft/.cursor/skills.
 ## Link ~/.s6craft/.cursorignore to the repository .cursorignore.
 ## Link ~/.s6craft/.cursorrules to the repository .cursorrules.
 ## Existing paths or registrations are never overwritten. Prints the repo path.
-## Create db, infrastructure, scripts, services/nginx, ui and Cursor rules/skills/plan directories.
+## Create db, infrastructure, scripts, services/nginx, ui, Claude rules and Cursor rules/skills/plan directories.
 ## nginx: scaffold the UI/API reverse proxy and reserve services/nginx through the allocator.
 ## --support accepts =nginx or a separate nginx value. Without it, retain the empty nginx directory.
 ## Write its conventional block port to env-dir/default/PORT and the selected user's PORT.
@@ -61,7 +63,7 @@ if [ -e "$path" ] || [ -L "$path" ]; then
     bootstrap_error "path already exists: $path"
 fi
 rules_dir="$HOME/.s6craft"
-if [ ! -d "$rules_dir/.cursor/rules" ] || [ ! -f "$rules_dir/AGENTS.md" ] || [ ! -f "$rules_dir/.cursorignore" ]; then
+if [ ! -d "$rules_dir/.cursor/rules" ] || [ ! -d "$rules_dir/.claude/rules" ] || [ ! -f "$rules_dir/CLAUDE.md" ] || [ ! -f "$rules_dir/CODEX.md" ] || [ ! -f "$rules_dir/.cursorignore" ]; then
     bootstrap_error "missing shared rules in $rules_dir"
 fi
 cursor_rules="$rules_dir/.cursorrules"
@@ -77,7 +79,7 @@ fi
 # Reserve before scaffolding so allocation failures leave no repository behind.
 port allocate create "$name" -c 100 >&2
 mkdir -- "$path"
-mkdir -p "$path/.cursor/rules" "$path/.cursor/skills" "$path/.cursor/plans/old" "$path/.cursor/plans/todo" \
+mkdir -p "$path/.cursor/rules" "$path/.cursor/skills" "$path/.cursor/plans/old" "$path/.cursor/plans/todo" "$path/.claude/rules" \
     "$path/db" "$path/infrastructure" "$path/scripts" "$path/services/nginx" "$path/ui"
 # Create the allocator's discovery input before asking it to reserve nginx first.
 # Never duplicate its preferred-port arithmetic in bootstrap or write a guessed port.
@@ -101,7 +103,19 @@ for rule in "$rules_dir"/.cursor/rules/*.mdc; do
     [ -f "$rule" ] || continue
     bootstrap_link_missing "$rule" "$path/.cursor/rules/${rule##*/}"
 done
-bootstrap_link_missing "$rules_dir/AGENTS.md" "$path/AGENTS.md"
+for rule in "$rules_dir"/.claude/rules/*.md; do
+    [ -f "$rule" ] || continue
+    bootstrap_link_missing "$rule" "$path/.claude/rules/${rule##*/}"
+done
+bootstrap_link_missing "$rules_dir/CLAUDE.md" "$path/CLAUDE.md"
+bootstrap_link_missing "$rules_dir/CODEX.md" "$path/CODEX.md"
+for codex in "$rules_dir"/*/CODEX.md; do
+    [ -f "$codex" ] || continue
+    dir=${codex%/CODEX.md}
+    dir=${dir##*/}
+    [ -d "$path/$dir" ] || continue
+    bootstrap_link_missing "$codex" "$path/$dir/CODEX.md"
+done
 bootstrap_link_missing "$rules_dir/.cursorignore" "$path/.cursorignore"
 bootstrap_link_missing "$cursor_rules" "$path/.cursorrules"
 for skill in "$rules_dir"/.cursor/skills/*; do
