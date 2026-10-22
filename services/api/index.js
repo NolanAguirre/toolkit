@@ -124,6 +124,22 @@ async function regularFile(directory, relative) {
   }
 }
 
+async function databaseEngine(repo, name) {
+  const state = process.env.UTIL_PATH
+  if (!state || !repoName.test(repo.name) || !/^[a-z][a-z0-9_]{0,62}$/.test(name)) return null
+  let registry
+  try {
+    registry = await fs.realpath(path.resolve(state, 'bootstrap/repos', repo.name, 'databases'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+  const file = await regularFile(registry, `${name}/engine`)
+  if (!file) return null
+  const value = (await fs.readFile(file, 'utf8')).trim()
+  return value === 'postgres' || value === 'sqlite' ? value : null
+}
+
 async function inventory(repo, folder) {
   const items = await entries(path.join(repo.path, folder))
   return Promise.all(items.map(async item => {
@@ -141,7 +157,12 @@ async function inventory(repo, folder) {
         }
       }
     }
-    return { name: item.name, path: path.join(repo.path, relative), port }
+    return {
+      name: item.name,
+      path: path.join(repo.path, relative),
+      port,
+      ...(folder === 'db' ? { engine: await databaseEngine(repo, item.name) } : {}),
+    }
   }))
 }
 

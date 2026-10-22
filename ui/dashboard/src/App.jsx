@@ -41,6 +41,7 @@ const optionDevIds = {
   'component-library': 'u1i6o9s',
 }
 const labels = { create: 'New repository', import: 'Import repository', services: 'Add service', uis: 'Add React UI', databases: 'Add database' }
+const engineLabels = { sqlite: 'SQLite', postgres: 'PostgreSQL' }
 const themeStorageKey = 'toolkit-dashboard-theme'
 
 const storedTheme = () => {
@@ -111,7 +112,7 @@ function ResourceList({ title, items, kind, onAdd, busy, devId, children }) {
   return <DevScope id={devId} state={{ kind, count: items.length }}><section className="panel resource-panel">
     <div className="panel-heading"><h2>{title} <span className="count">{items.length}</span></h2><button aria-label={labels[kind]} disabled={busy} onClick={() => onAdd(kind)}>+ Add</button></div>
     {children}
-    {items.length === 0 ? <p className="empty">No {title.toLowerCase()} yet.</p> : <ul className="resources">{items.map(item => <li key={item.name}><div><strong>{item.name}</strong><span className="path">{item.path}</span></div>{item.port && <span className="badge">Port {item.port}</span>}</li>)}</ul>}
+    {items.length === 0 ? <p className="empty">No {title.toLowerCase()} yet.</p> : <ul className="resources">{items.map(item => <li key={item.name}><div><strong>{item.name}</strong><span className="path">{item.path}</span></div>{item.port && <span className="badge">Port {item.port}</span>}{item.engine && <span className="badge">{engineLabels[item.engine] || item.engine}</span>}</li>)}</ul>}
   </section></DevScope>
 }
 

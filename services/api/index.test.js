@@ -79,6 +79,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     assert.deepEqual(details.services.map(item => item.name), ['api', 'nginx'])
     assert.deepEqual(details.uis.map(item => item.name), ['dashboard'])
     assert.deepEqual(details.databases.map(item => item.name), ['api'])
+    assert.equal(details.databases[0].engine, 'sqlite')
     assert.notEqual(details.services[0].port, details.uis[0].port)
     assert.equal((await post('/api/repos/example/select', {})).status, 200)
     assert.equal((await (await get('/api/repos')).json()).repos.find(repo => repo.current).name, 'example')
