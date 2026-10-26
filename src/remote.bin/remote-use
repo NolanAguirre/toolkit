@@ -1,0 +1,14 @@
+#!/bin/sh
+##<help>
+## use - Copy a named host's SSH settings into a repository target.
+## Usage: remote use <repo> <host-name>
+## Create or replace the repository target. Do not connect to the host.
+## Later host registry edits/removal do not change this saved target.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+. "$REMOTE_BIN/../lib/files.sh"
+profile="$REMOTE_STATE/hosts/$2.json"
+[ -f "$profile" ] || remote_error 'host missing; use remote host load'
+remote_target_load "$profile"
+remote_connection_write

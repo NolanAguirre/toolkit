@@ -1,0 +1,12 @@
+#!/bin/sh
+##<help>
+## load - Register or replace a named deployment host (repeatable).
+## Usage: remote host load <name> <host-or-connection> [--user user] [--port port] [--identity-file path]
+## Independent of repositories. Save locally without contacting hosts.
+## Replace all settings; omitted user/port default to local user/22, identity to default keys.
+## Existing repository targets are unchanged; use remote use to copy these settings.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+. "$REMOTE_BIN/../lib/files.sh"
+remote_connection_write

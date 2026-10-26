@@ -1,0 +1,15 @@
+#!/bin/sh
+##<help>
+## ls - List named deployment hosts as name, host, user, port, identity (TSV).
+## Usage: remote host ls
+## Read local state without contacting hosts. An empty registry prints nothing.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+for target in "$REMOTE_STATE"/hosts/*.json; do
+    [ -f "$target" ] || continue
+    name=${target##*/}
+    name=${name%.json}
+    remote_target_load "$target"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$REMOTE_TARGET" "$REMOTE_USER" "$REMOTE_PORT" "$REMOTE_IDENTITY"
+done

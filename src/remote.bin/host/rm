@@ -1,0 +1,10 @@
+#!/bin/sh
+##<help>
+## rm - Remove a named deployment host from the local registry.
+## Usage: remote host rm <name>
+## Keep existing repository targets and the host itself unchanged.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+[ -f "$REMOTE_CONFIG" ] || remote_error 'host missing'
+rm -- "$REMOTE_CONFIG"

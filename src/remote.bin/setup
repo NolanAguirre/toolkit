@@ -12,5 +12,6 @@ mkdir -p "$UTIL_PATH/remote"
 file_lock "$UTIL_PATH/remote/lock"
 mkdir -p "$UTIL_PATH/remote/targets" "$UTIL_PATH/remote/history"
 mkdir -p "$UTIL_PATH/remote/connections"
+mkdir -p "$UTIL_PATH/remote/hosts"
 mkdir -p "$UTIL_PATH/remote/sync"
 printf '%s\n' 'remote initialized'

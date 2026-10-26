@@ -128,3 +128,9 @@ WRAPPER
     fi
     ssh "$@" "$REMOTE_TARGET" 'sudo -n sh -s' < "$payload"
 )
+
+# Caller validates connection fields and holds the remote state lock.
+remote_connection_write() {
+    atomic_write "$REMOTE_CONFIG" jq -n --arg host "$REMOTE_TARGET" --arg user "$REMOTE_USER" --arg port "$REMOTE_PORT" --arg identity "$REMOTE_IDENTITY" \
+        '{host: $host, user: $user, port: ($port | tonumber), identityFile: (if $identity == "" then null else $identity end)}'
+}

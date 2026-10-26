@@ -11,6 +11,13 @@ file_lock "$REMOTE_STATE/lock"
 command=$1
 shift
 action=${command##*/}
+registry=0
+case "$command" in
+    */host/*)
+        registry=1
+        action="remote-$action"
+        ;;
+esac
 case "$command" in
     */sync/*)
         . "$REMOTE_BIN/.sync-validate"
@@ -23,7 +30,7 @@ case "$action" in
         export REMOTE_STATE REMOTE_BIN
         exec "$command" "$@"
         ;;
-    remote-create|remote-edit)
+    remote-create|remote-edit|remote-load)
         [ -d "$REMOTE_STATE/connections" ] || remote_error 'run toolkit setup remote to initialize JSON connection settings'
         [ "$#" -ge 2 ] || remote_error 'usage: remote create|edit <repo> <host-or-connection> [--user user] [--port port] [--identity-file path]'
         repo=$1
@@ -85,6 +92,10 @@ case "$action" in
         remote_connection_validate
         export REMOTE_TARGET REMOTE_USER REMOTE_PORT REMOTE_IDENTITY
         ;;
+    remote-use)
+        [ "$#" -eq 2 ] || remote_error 'usage: remote use <repo> <host-name>'
+        remote_token "$2" || remote_error 'invalid host name'
+        ;;
     remote-rm|remote-status|remote-releases)
         [ "$#" -eq 1 ] || remote_error 'usage: remote rm|status|releases <repo>'
         ;;
@@ -114,6 +125,13 @@ case "$action" in
         remote_error 'unknown remote command'
         ;;
 esac
+if [ "$registry" = 1 ]; then
+    [ -d "$REMOTE_STATE/hosts" ] || remote_error 'run toolkit setup remote to initialize the host registry'
+    remote_token "$1" || remote_error 'invalid host name'
+    REMOTE_CONFIG="$REMOTE_STATE/hosts/$1.json"
+    export REMOTE_BIN REMOTE_STATE REMOTE_CONFIG
+    exec "$command" "$@"
+fi
 if [ "$action" = remote-setup ]; then
     REMOTE_REPO=$2
 else
@@ -135,7 +153,7 @@ registration="$UTIL_PATH/bootstrap/repos/$REMOTE_REPO/path"
 root=$(cat "$registration")
 [ -d "$root/services" ] && [ ! -L "$root/services" ] || remote_error 'registered repo needs a real services directory'
 case "$action" in
-    remote-create|remote-edit)
+    remote-create|remote-edit|remote-use)
         exec "$command" "$@"
         ;;
 esac
