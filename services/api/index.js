@@ -3,7 +3,6 @@ const { readFileSync } = require('node:fs')
 const fs = require('node:fs/promises')
 const { createServer } = require('node:http')
 const path = require('node:path')
-const { userInfo } = require('node:os')
 
 const root = path.resolve(__dirname, '../..')
 const env = (name) => process.env[name] || readFileSync(path.join(__dirname, 'env-dir/default', name), 'utf8').trim()
@@ -194,7 +193,6 @@ async function deployments(repo) {
   } catch (error) { remoteError = error.message }
   return {
     files, remoteTarget: target?.host || null, remoteConnection: target, remoteError,
-    remoteDefaults: { user: userInfo().username, port: 22 },
     services: (await inventory(repo, 'services')).map(service => service.name),
     releases: (await Promise.all(releases.map(async release => {
       const releasePath = path.join(repo.path, '.release', release.name)
@@ -300,34 +298,19 @@ function createApi() {
       if (action === 'releases' && get) return send(200, await runningReleases(repo))
       if (action === 'target' && !get) {
         const body = await jsonBody(request)
-        if (body.remoteName !== undefined) {
-          fields(body, ['remoteName'])
-          const remoteName = body.remoteName
-          if (typeof remoteName !== 'string' || !repoName.test(remoteName)) throw new ApiError(400, 'Provide a valid registered remote name.')
-          await command('remote', ['use', name, remoteName], repo.path)
-          return send(200, { target: await remoteConnection(repo) })
-        }
-        fields(body, ['host', 'connection', 'user', 'port', 'identityFile'])
-        if ((body.host === undefined) === (body.connection === undefined)) throw new ApiError(400, 'Provide either host or connection.')
-        const destination = body.host ?? body.connection
-        if (typeof destination !== 'string' || !destination || destination.length > 512 || /[\s\x00-\x1f\x7f]/.test(destination)) throw new ApiError(400, 'Provide an IP, DNS hostname, user@host or ssh://user@host:port.')
-        const options = []
-        if (body.user !== undefined) {
-          if (typeof body.user !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(body.user)) throw new ApiError(400, 'Provide a valid SSH user.')
-          options.push('--user', body.user)
-        }
-        if (body.port !== undefined) {
-          if (!Number.isInteger(body.port) || body.port < 1 || body.port > 65535) throw new ApiError(400, 'SSH port must be between 1 and 65535.')
-          options.push('--port', String(body.port))
-        }
-        if (body.identityFile !== undefined && body.identityFile !== null) options.push('--identity-file', absolutePath(body.identityFile))
-        const existing = await remoteConnection(repo)
-        await command('remote', [existing ? 'edit' : 'create', name, destination, ...options], repo.path)
+        fields(body, ['remoteName'])
+        const remoteName = body.remoteName
+        if (typeof remoteName !== 'string' || !repoName.test(remoteName)) throw new ApiError(400, 'Choose a registered remote.')
+        await command('remote', ['use', name, remoteName], repo.path)
         return send(200, { target: await remoteConnection(repo) })
       }
       if (action === 'deployments' && !get) {
         const body = await jsonBody(request)
         fields(body, ['releasePath', 'service'])
+        const target = await remoteConnection(repo)
+        const remotes = await registeredRemotes()
+        const registered = target && remotes.some(remote => remote.host === target.host && remote.user === target.user && remote.port === target.port && remote.identityFile === target.identityFile)
+        if (!registered) throw new ApiError(422, 'Choose and save a registered remote before deploying. The saved target is missing or no longer matches the registry.')
         const releasePath = absolutePath(body.releasePath)
         const service = body.service === undefined ? null : validName(body.service, itemName)
         try {
