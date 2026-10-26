@@ -8,9 +8,10 @@ if (import.meta.env.DEV) {
   DevScope = dev.DevScope
 }
 
-async function api(url, body, signal) {
+async function api(url, body, signal, method) {
   const response = await fetch(url, {
     signal,
+    ...(method ? { method, headers: { 'X-Toolkit-Request': '1' } } : {}),
     ...(body === undefined ? {} : {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Toolkit-Request': '1' },
@@ -108,11 +109,29 @@ function CreateForm({ kind, repo, parentPath, serviceTypes, busy, setBusy, onCom
   </form></DevScope>
 }
 
-function ResourceList({ title, items, kind, onAdd, busy, devId, children }) {
-  return <DevScope id={devId} state={{ kind, count: items.length }}><section className="panel resource-panel">
+function ResourceList({ title, items, kind, onAdd, onDelete, busy, devId, children }) {
+  const [deleting, setDeleting] = useState('')
+  const [typed, setTyped] = useState('')
+  const startDelete = name => {
+    setDeleting(name)
+    setTyped('')
+  }
+  const confirmDelete = async event => {
+    event.preventDefault()
+    if (await onDelete(deleting)) setDeleting('')
+  }
+  return <DevScope id={devId} state={{ kind, count: items.length, deleting: deleting || undefined }}><section className="panel resource-panel">
     <div className="panel-heading"><h2>{title} <span className="count">{items.length}</span></h2><button aria-label={labels[kind]} disabled={busy} onClick={() => onAdd(kind)}>+ Add</button></div>
     {children}
-    {items.length === 0 ? <p className="empty">No {title.toLowerCase()} yet.</p> : <ul className="resources">{items.map(item => <li key={item.name}><div><strong>{item.name}</strong><span className="path">{item.path}</span></div>{item.port && <span className="badge">Port {item.port}</span>}{item.engine && <span className="badge">{engineLabels[item.engine] || item.engine}</span>}</li>)}</ul>}
+    {items.length === 0 ? <p className="empty">No {title.toLowerCase()} yet.</p> : <ul className="resources">{items.map(item => <li key={item.name} className={deleting === item.name ? 'deleting' : ''}><div className="resource-row"><div><strong>{item.name}</strong><span className="path">{item.path}</span></div><div className="resource-badges">{item.port && <span className="badge">Port {item.port}</span>}{item.engine && <span className="badge">{engineLabels[item.engine] || item.engine}</span>}{onDelete && deleting !== item.name && <DevScope id="w3x8c5b"><button type="button" className="danger" aria-label={`Delete ${item.name}`} disabled={busy} onClick={() => startDelete(item.name)}>Delete</button></DevScope>}</div></div>
+      {deleting === item.name && <DevScope id="r6m1v4z" state={{ name: item.name }}><form className="delete-confirm" onSubmit={confirmDelete} aria-label={`Delete ${item.name}`}>
+        <fieldset disabled={busy}>
+          <p className="form-error">This permanently deletes <code>{item.path}</code> and releases its ports. Running processes, databases and data outside the repository are kept.</p>
+          <label>Type {item.name} to confirm<input autoFocus value={typed} onChange={event => setTyped(event.target.value)} /></label>
+          <div className="form-actions"><button className="danger" type="submit" disabled={typed !== item.name}>{busy ? 'Deleting…' : 'Delete service'}</button><button type="button" onClick={() => setDeleting('')}>Cancel</button></div>
+        </fieldset>
+      </form></DevScope>}
+    </li>)}</ul>}
   </section></DevScope>
 }
 
@@ -332,6 +351,20 @@ export default function App() {
     finally { setBusy(false) }
   }
 
+  const deleteService = async service => {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    let result
+    try {
+      result = await api(`/api/repos/${encodeURIComponent(selected)}/services/${encodeURIComponent(service)}`, undefined, undefined, 'DELETE')
+      setNotice(`Deleted ${result.path}`)
+      await refresh(selected)
+    } catch (failure) { setError(failure.message) }
+    finally { setBusy(false) }
+    return Boolean(result)
+  }
+
   const repo = repos.find(repo => repo.name === selected)
   const createForm = form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} serviceTypes={serviceTypes} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
@@ -349,7 +382,7 @@ export default function App() {
         {repo ? <>
           <DevScope id="p8a3s7d" state={{ name: repo.name, current: Boolean(repo.current) }}><div className="repo-heading"><div><h2>{repo.name}</h2><p className="path">{repo.path}</p></div>{repo.current ? <span className="badge">Current in bootstrap</span> : <button disabled={busy} onClick={selectCurrent}>Set current</button>}</div></DevScope>
           <DevScope id="f1g5h9j" state={{ view }}><nav className="tabs" aria-label="Repository view"><button disabled={busy} className={view === 'resources' ? 'active' : ''} aria-pressed={view === 'resources'} onClick={() => { setView('resources'); setError('') }}>Services & UIs</button><button disabled={busy} className={view === 'deployments' ? 'active' : ''} aria-pressed={view === 'deployments'} onClick={() => { setView('deployments'); setForm(null); setError('') }}>Deployments</button></nav></DevScope>
-          {view === 'resources' ? detail ? <div className="resource-stack"><ResourceList devId="t4y8u2i" title="Services" kind="services" items={detail.services} onAdd={setForm} busy={busy}>{form === 'services' && createForm}</ResourceList><ResourceList devId="n4p7q2w" title="UIs" kind="uis" items={detail.uis} onAdd={setForm} busy={busy}>{form === 'uis' && createForm}</ResourceList><ResourceList devId="h8j3k6m" title="Databases" kind="databases" items={detail.databases} onAdd={setForm} busy={busy}>{form === 'databases' && createForm}</ResourceList></div> : <p className="empty">{error ? 'Could not load this repository.' : 'Loading repository…'}</p> : deployment ? <DeploymentView key={selected} data={deployment} repo={repo} busy={busy} setBusy={setBusy} /> : <p className="empty">{error ? 'Could not load deployment details.' : 'Loading deployments…'}</p>}
+          {view === 'resources' ? detail ? <div className="resource-stack"><ResourceList devId="t4y8u2i" title="Services" kind="services" items={detail.services} onAdd={setForm} onDelete={deleteService} busy={busy}>{form === 'services' && createForm}</ResourceList><ResourceList devId="n4p7q2w" title="UIs" kind="uis" items={detail.uis} onAdd={setForm} busy={busy}>{form === 'uis' && createForm}</ResourceList><ResourceList devId="h8j3k6m" title="Databases" kind="databases" items={detail.databases} onAdd={setForm} busy={busy}>{form === 'databases' && createForm}</ResourceList></div> : <p className="empty">{error ? 'Could not load this repository.' : 'Loading repository…'}</p> : deployment ? <DeploymentView key={selected} data={deployment} repo={repo} busy={busy} setBusy={setBusy} /> : <p className="empty">{error ? 'Could not load deployment details.' : 'Loading deployments…'}</p>}
         </> : <section className="panel empty">Select a repository to view its services, UIs, and deployments.</section>}
       </div></DevScope>
     </div>

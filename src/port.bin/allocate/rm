@@ -1,18 +1,19 @@
 #!/bin/sh
 ##<help>
-## allocate rm - Release a global port or an entire domain, atomically rewriting the index.
-## Usage: port allocate rm (-p|--port <port> | -d|--domain <domain>)
-## Supply exactly one option. Removing a port keeps its domain and automatic block.
+## allocate rm - Release a global port, a named port or an entire domain, atomically rewriting the index.
+## Usage: port allocate rm (-p|--port <port> | -d|--domain <domain> | <domain> -n|--name <name>)
+## Supply exactly one form. Removing a port keeps its domain and automatic block.
 ## Removing a domain releases its block and every port it owns, including fixed ports.
+## Removing a name releases every port in the domain with that name or with the
+## discovered message <domain>/<name>. No matching port is not an error.
 ## Released ports can be allocated again. Running processes are not stopped.
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/ports.sh"
-if [ "$#" -ne 2 ]; then
-    port_error 'usage: port allocate rm (-p <port> | -d <domain>)'
-fi
+usage='usage: port allocate rm (-p <port> | -d <domain> | <domain> -n <name>)'
 case "$1" in
     -p|--port)
+        [ "$#" -eq 2 ] || port_error "$usage"
         port=$(port_number "$2")
         record=$(port_record "$port")
         if [ -z "$record" ]; then
@@ -26,6 +27,7 @@ case "$1" in
         printf 'removed port %s from %s\n' "$port" "$domain"
         ;;
     -d|--domain)
+        [ "$#" -eq 2 ] || port_error "$usage"
         domain=$2
         port_domain "$domain"
         if [ ! -d "$PORT_ROOT/$domain" ]; then
@@ -38,6 +40,27 @@ case "$1" in
         printf 'removed domain %s (%s ports)\n' "$domain" "$count"
         ;;
     *)
-        port_error 'usage: port allocate rm (-p <port> | -d <domain>)'
+        [ "$#" -eq 3 ] || port_error "$usage"
+        case "$2" in
+            -n|--name)
+                ;;
+            *)
+                port_error "$usage"
+                ;;
+        esac
+        domain=$1
+        name=$3
+        port_require_domain "$domain"
+        printf '%s' "$name" | jq -Rse 'test("[^[:space:]]") and (explode | all(. >= 32 and . != 127))' >/dev/null ||
+            port_error 'a nonempty name without control characters is required'
+        message="$domain/$name"
+        ports=$(jq -r --arg domain "$domain" --arg name "$name" --arg message "$message" \
+            'select(.domain == $domain and (.name == $name or .message == $message)) | .port' "$PORT_INDEX")
+        atomic_write "$PORT_INDEX" jq -Rr --arg domain "$domain" --arg name "$name" --arg message "$message" \
+            'select(fromjson | .domain != $domain or (.name != $name and .message != $message))' "$PORT_INDEX"
+        for port in $ports; do
+            rm -f "$PORT_ROOT/$domain/$port"
+            printf 'removed port %s from %s\n' "$port" "$domain"
+        done
         ;;
 esac

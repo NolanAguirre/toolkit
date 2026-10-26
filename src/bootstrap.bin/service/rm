@@ -1,0 +1,34 @@
+#!/bin/sh
+##<help>
+## service rm - Delete a service and release its ports.
+## Usage: bootstrap service rm <name>
+## Run from the repository root. The current directory's port domain must exist.
+## Release services/<name> ports in that domain, then delete services/<name>.
+## A failed release leaves the service directory in place. Print the removed path.
+## Running processes are not stopped. Same-name databases, WRITE_DIR data and
+## queue directories outside the repository are kept.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+if [ "$#" -ne 1 ]; then
+    bootstrap_error 'usage: bootstrap service rm <name>'
+fi
+name=$1
+if ! printf '%s' "$name" | grep -zq '^[a-z0-9][a-z0-9._-]*$'; then
+    bootstrap_error 'service names must start with a lowercase letter or digit and contain only lowercase letters, digits, dots, underscores or hyphens'
+fi
+root=$(pwd -P)
+path="$root/services/$name"
+if [ -L "$path" ] || [ ! -d "$path" ]; then
+    bootstrap_error "service not found: $path"
+fi
+domain=${root##*/}
+bootstrap_name "$domain"
+command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
+# The child acquires the port lock while our parent retains the bootstrap lock.
+port allocate rm "$domain" -n "services/$name" >&2
+# Hide the service with one rename so a failed delete never looks half-present.
+pending=$(mktemp -d "$root/services/.rm.XXXXXX")
+mv -T -- "$path" "$pending/$name"
+rm -rf -- "$pending"
+printf '%s\n' "$path"

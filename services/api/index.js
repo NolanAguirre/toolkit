@@ -235,7 +235,8 @@ function createApi() {
       let parts
       try { parts = pathname.split('/').filter(Boolean).map(decodeURIComponent) } catch { throw new ApiError(400, 'Invalid URL encoding.') }
       if (parts[0] !== 'api') throw new ApiError(404, 'Not found')
-      if (!['GET', 'POST'].includes(request.method)) {
+      const removal = request.method === 'DELETE' && parts[1] === 'repos' && parts[3] === 'services' && parts.length === 5
+      if (!['GET', 'POST'].includes(request.method) && !removal) {
         response.setHeader('Allow', 'GET, POST')
         throw new ApiError(405, 'Method not allowed')
       }
@@ -257,7 +258,8 @@ function createApi() {
         fields(body, ['path'])
         return send(201, { path: await command('bootstrap', ['repo', 'import', absolutePath(body.path)]) })
       }
-      if (parts[1] !== 'repos' || parts.length < 3 || parts.length > 4) throw new ApiError(404, 'Not found')
+      if (parts[1] !== 'repos' || parts.length < 3 || (parts.length > 4 && !removal)) throw new ApiError(404, 'Not found')
+      if (removal && request.headers['x-toolkit-request'] !== '1') throw new ApiError(403, 'The X-Toolkit-Request: 1 header is required.')
       const name = validName(parts[2])
       const action = parts[3]
       if (action === 'target' && !get && deploying.has(name)) throw new ApiError(409, 'Wait for the deployment to finish before changing its target.')
@@ -270,6 +272,17 @@ function createApi() {
       const repo = (await repositories()).find(repo => repo.name === name)
       if (!repo) throw new ApiError(404, 'Repository is not registered.')
       try { repo.path = await fs.realpath(repo.path) } catch { throw new ApiError(404, 'Registered repository directory is missing.') }
+      if (removal) {
+        const service = validName(parts[4], itemName)
+        try {
+          if (!(await fs.lstat(path.join(repo.path, 'services'))).isDirectory()) throw new ApiError(422, 'services/ must be a real directory, not a symlink.')
+          if (!(await fs.lstat(path.join(repo.path, 'services', service))).isDirectory()) throw new ApiError(404, 'Service not found.')
+        } catch (error) {
+          if (error.code === 'ENOENT') throw new ApiError(404, 'Service not found.')
+          throw error
+        }
+        return send(200, { path: await command('bootstrap', ['service', 'rm', service], repo.path) })
+      }
       if (parts.length === 3 && get) {
         const [services, uis, databases] = await Promise.all([inventory(repo, 'services'), inventory(repo, 'ui'), inventory(repo, 'db')])
         return send(200, { repo, services, uis, databases })
