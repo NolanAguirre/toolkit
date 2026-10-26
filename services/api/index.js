@@ -166,6 +166,14 @@ async function inventory(repo, folder) {
   }))
 }
 
+async function registeredRemotes() {
+  const output = await command('remote', ['host', 'ls'], root, { readOnly: true })
+  return output.split('\n').filter(Boolean).map(line => {
+    const [name, host, user, port, identityFile] = line.split('\t')
+    return { name, host, user, port: Number(port), identityFile: identityFile || null }
+  })
+}
+
 async function remoteConnection(repo) {
   const targets = await command('remote', ['ls'], root, { readOnly: true })
   const record = targets.split('\n').map(line => line.split('\t')).find(([name]) => name === repo.name)
@@ -242,6 +250,7 @@ function createApi() {
       }
       const get = request.method === 'GET'
       if (pathname === '/api/health' && get) return send(200, { status: 'ok' })
+      if (pathname === '/api/remotes' && get) return send(200, { remotes: await registeredRemotes() })
       if (pathname === '/api/config' && get) return send(200, { parentPath: path.dirname(root), serviceTypes: await serviceTypes() })
       if (pathname === '/api/repos' && get) return send(200, { repos: await repositories() })
       if (pathname === '/api/repos' && !get) {
@@ -291,6 +300,13 @@ function createApi() {
       if (action === 'releases' && get) return send(200, await runningReleases(repo))
       if (action === 'target' && !get) {
         const body = await jsonBody(request)
+        if (body.remoteName !== undefined) {
+          fields(body, ['remoteName'])
+          const remoteName = body.remoteName
+          if (typeof remoteName !== 'string' || !repoName.test(remoteName)) throw new ApiError(400, 'Provide a valid registered remote name.')
+          await command('remote', ['use', name, remoteName], repo.path)
+          return send(200, { target: await remoteConnection(repo) })
+        }
         fields(body, ['host', 'connection', 'user', 'port', 'identityFile'])
         if ((body.host === undefined) === (body.connection === undefined)) throw new ApiError(400, 'Provide either host or connection.')
         const destination = body.host ?? body.connection

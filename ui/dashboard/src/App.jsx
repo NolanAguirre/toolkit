@@ -161,13 +161,34 @@ function DeploymentView({ data, repo, busy, setBusy }) {
   const [targetChanged, setTargetChanged] = useState(false)
   const [targetError, setTargetError] = useState(data.remoteError || '')
   const [targetNotice, setTargetNotice] = useState('')
+  const [remotes, setRemotes] = useState([])
+  const [remoteName, setRemoteName] = useState('')
+  const [remotesLoading, setRemotesLoading] = useState(true)
+  const [remotesError, setRemotesError] = useState('')
+  const [remotesRevision, setRemotesRevision] = useState(0)
+  const selectedRemote = remotes.find(remote => remote.name === remoteName)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setRemotesLoading(true)
+    setRemotesError('')
+    api('/api/remotes', undefined, controller.signal).then(result => {
+      if (!controller.signal.aborted) setRemotes(result.remotes)
+    }).catch(failure => {
+      if (!controller.signal.aborted) setRemotesError(failure.message)
+    }).finally(() => {
+      if (!controller.signal.aborted) setRemotesLoading(false)
+    })
+    return () => controller.abort()
+  }, [remotesRevision])
   async function saveTarget(event) {
     event.preventDefault()
+    if (busy || checking || (remoteName && (remotesLoading || remotesError || !selectedRemote))) return
     setBusy(true)
     setTargetError('')
     setTargetNotice('')
     try {
-      const saved = await api(`/api/repos/${encodeURIComponent(repo.name)}/target`, {
+      const saved = await api(`/api/repos/${encodeURIComponent(repo.name)}/target`, remoteName ? { remoteName } : {
         connection,
         ...(sshUser ? { user: sshUser } : {}),
         ...(sshPort ? { port: Number(sshPort) } : {}),
@@ -179,7 +200,7 @@ function DeploymentView({ data, repo, busy, setBusy }) {
       setSshPort(String(saved.target.port))
       setIdentityFile(saved.target.identityFile || '')
       setTargetChanged(false)
-      setTargetNotice('Target saved. No host connection was made.')
+      setTargetNotice(remoteName ? `Target saved from ${remoteName}. Later registry changes will not change this saved target.` : 'Target saved. No host connection was made.')
       setLive(null)
       setResult(null)
       setError('')
@@ -220,6 +241,23 @@ function DeploymentView({ data, repo, busy, setBusy }) {
       <h3>Deployment target</h3>
       {target?.legacy && <p className="notice">This target uses a legacy SSH alias. Save an IP address, DNS hostname or connection string to replace it.</p>}
       <fieldset disabled={busy || checking}>
+        <DevScope id="b6t9q2v" state={{ remoteName, loading: remotesLoading }}><div className="remote-picker">
+          <label>Registered remote<select value={remoteName} disabled={remotesLoading} onChange={event => setRemoteName(event.target.value)}>
+            <option value="">Enter SSH settings manually</option>
+            {remoteName && !selectedRemote && <option value={remoteName}>{remoteName} (unavailable)</option>}
+            {remotes.map(remote => <option key={remote.name} value={remote.name}>{remote.name} — {remote.user}@{remote.host}:{remote.port}</option>)}
+          </select></label>
+          <button type="button" disabled={remotesLoading} onClick={() => {
+            setRemotesRevision(value => value + 1)
+            if (remoteName) { setTargetChanged(true); setTargetNotice('') }
+          }}>{remotesLoading ? 'Loading remotes…' : 'Refresh remotes'}</button>
+          {remotesError && <p className="form-error" role="alert">Could not load registered remotes: {remotesError}</p>}
+          {!remotesLoading && !remotesError && !remotes.length && <p className="hint">No remotes registered yet. You can enter SSH settings below.</p>}
+          {remoteName && <p className="hint">Saving copies this remote’s current SSH settings into this repository’s deployment target.</p>}
+          {selectedRemote && <p className="hint">SSH key: {selectedRemote.identityFile || 'Default keys or agent'}</p>}
+          {remoteName && !selectedRemote && !remotesLoading && <p className="form-error" role="alert">This remote is unavailable. Choose another remote or enter SSH settings manually.</p>}
+        </div></DevScope>
+        {!remoteName && <>
         <label>Host or SSH connection<input required value={connection} onChange={event => { setConnection(event.target.value); setSshUser(''); setSshPort('') }} placeholder="192.168.1.50 or ssh://deploy@example.com:2222" /><span className="hint">Accepts an IP address, DNS hostname, user@host or ssh://user@host:port.</span></label>
         <p className="hint">Only the host is required. Defaults: SSH user {data.remoteDefaults.user}, port {data.remoteDefaults.port}, and your default SSH keys or agent. A connection string can supply a different user or port.</p>
         <details className="deployment-options">
@@ -230,7 +268,8 @@ function DeploymentView({ data, repo, busy, setBusy }) {
             <label>SSH key path<input value={identityFile} onChange={event => setIdentityFile(event.target.value)} placeholder="/home/you/.ssh/id_ed25519" pattern="/.*" /><span className="hint">Optional absolute path on the API machine. Otherwise uses default SSH keys or the agent.</span></label>
           </fieldset>
         </details>
-        <button type="submit">Save target</button>
+        </>}
+        <button type="submit" disabled={Boolean(remoteName && (remotesLoading || remotesError || !selectedRemote))}>Save target</button>
       </fieldset>
       <p className="hint">The host needs SSH access, s6 and noninteractive sudo for deployment.</p>
       {targetChanged && <p className="hint">Save target changes before checking or deploying.</p>}

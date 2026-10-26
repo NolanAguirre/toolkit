@@ -196,3 +196,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 .dev-inspector button { font-family: inherit; }
 .dev-inspector button:disabled { cursor: not-allowed; }
 .dev-inspector__action { font-size: 0.75rem; font-weight: 400; }
+
+.remote-picker { display: grid; gap: 12px; }
+.remote-picker > label { display: grid; gap: 9px; max-width: 640px; font-size: 13px; font-weight: 600; }
+.remote-picker > button { justify-self: start; }
