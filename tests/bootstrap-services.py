@@ -71,4 +71,99 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     assert (tagger/'remote-services').read_bytes() == before
     assert not list((fresh/'services').glob('.service.*'))
 
+    # Auth services need OpenResty, no nginx, and a fresh PostgreSQL database.
+    template = src/'bootstrap.bin/template'
+    assert configs['auth'][2:4] == ['http,db', 'http,db']
+    site = root/'site'
+    (site/'services').mkdir(parents=True)
+    call('bootstrap', 'repo', 'load', str(site))
+    call('port', 'allocate', 'create', 'site', '-s', '7300')
+    call('bootstrap', 'db', 'add', 'auth', '--support=postgres', cwd=site)
+    call('bootstrap', 'db', 'add', 'lite', '--support=sqlite', cwd=site)
+    deploy = site/'db/auth/deploy/v1.000.0.sql'
+    plan = site/'db/auth/sqitch.plan'
+    untouched = deploy.read_bytes()
+    original_plan = plan.read_text()
+
+    def add_auth(name='auth', ok=False):
+        return call('bootstrap', 'service', 'add', name, '--type=auth',
+                    '--support=http', '--support=db', cwd=site, ok=ok)
+
+    def unchanged():
+        assert not (site/'services/auth').exists()
+        assert deploy.read_bytes() == untouched
+        assert not (site/'services/openresty/routes/auth.conf').exists()
+        assert not list((site/'services').glob('.service.*'))
+
+    add_auth()
+    unchanged()
+    (site/'services/nginx').mkdir()
+    call('bootstrap', 'openresty', 'add', cwd=site)
+    (site/'services/nginx/nginx.conf').write_text('# configured\n')
+    add_auth()
+    unchanged()
+    (site/'services/nginx/nginx.conf').unlink()
+    add_auth('lite')
+    assert not (site/'services/lite').exists()
+    call('bootstrap', 'service', 'add', 'auth', '--type=auth', '--support=fs', cwd=site, ok=False)
+    unchanged()
+    deploy.write_text(untouched.decode() + '-- edited\n')
+    add_auth()
+    deploy.write_bytes(untouched)
+    unchanged()
+    plan.write_text(original_plan + 'v1.001.0 [v1.000.0] 2026-01-01T00:00:00Z Toolkit <toolkit@localhost> # next\n')
+    add_auth()
+    plan.write_text(original_plan)
+    unchanged()
+
+    # A failed npm install leaves no service, route or migration behind.
+    npm.write_text('#!/bin/sh\n[ "$1" != install ]\n')
+    add_auth()
+    unchanged()
+    npm.write_text('#!/bin/sh\nexit 0\n')
+
+    auth = site/'services/auth'
+    assert add_auth(ok=True) == str(auth)
+    assert deploy.read_bytes() == (template/'auth/deploy.sql').read_bytes()
+    assert (site/'db/auth/revert/v1.000.0.sql').read_text() == ''
+    assert (site/'db/auth/verify/v1.000.0.sql').read_text() == ''
+    assert (auth/'index.js').read_bytes() == (template/'auth/index.js').read_bytes()
+    port = (auth/'env-dir/default/PORT').read_text().strip()
+    assert (auth/'env-dir/tester/PORT').read_text().strip() == port
+    assert (auth/'env-dir/default/HOST').read_text() == '127.0.0.1\n'
+    assert (auth/'env-dir/default/DATABASE_URL').read_text() == 'postgresql://postgres@localhost:5432/auth\n'
+    route = (site/'services/openresty/routes/auth.conf').read_text()
+    assert route == (template/'auth/route.conf').read_text().replace('__PORT__', port)
+    assert f'proxy_pass http://127.0.0.1:{port}/auth/login;' in route
+    before = route
+    add_auth()
+    assert (site/'services/openresty/routes/auth.conf').read_text() == before
+
+    # Optional live check of the migration against a disposable database.
+    if shutil.which('psql') and subprocess.run(['psql', '-h', 'localhost', '-U', 'postgres', '-Atc', 'select 1'],
+                                               capture_output=True).returncode == 0:
+        database = f'toolkit_auth_test_{os.getpid()}'
+        connection = ['psql', '-h', 'localhost', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-Atq']
+        subprocess.run(connection + ['-c', f'create database {database}'], check=True)
+        try:
+            def sql(statement, ok=True):
+                result = subprocess.run(connection + ['-d', database, '-c', statement],
+                                        text=True, capture_output=True)
+                assert (result.returncode == 0) == ok, (statement, result.stderr)
+                return result.stdout.strip()
+            for _ in range(2):
+                subprocess.run(connection + ['-d', database, '-f', str(deploy)], check=True,
+                               env=dict(os.environ, PGOPTIONS='-c client_min_messages=warning'))
+            user = sql("select id from auth.register('a@example.com', 'correct horse')")
+            assert sql("select id from auth.authenticate('A@Example.com', 'correct horse')") == user
+            assert sql("select id is null from auth.authenticate('a@example.com', 'wrong password')") == 't'
+            assert sql("select id is null from auth.authenticate('b@example.com', 'correct horse')") == 't'
+            assert sql("select password_hash like '$2a$%' from auth_private.users") == 't'
+            sql("select auth.register('a@example.com', 'another password')", ok=False)
+            sql("select auth.register('c@example.com', 'short')", ok=False)
+            sql(f"select auth.register('c@example.com', '{'x' * 73}')", ok=False)
+            sql("select auth.register('not-an-email', 'long enough')", ok=False)
+        finally:
+            subprocess.run(connection + ['-c', f'drop database {database}'], check=True)
+
 print('bootstrap service scaffolding and foreground launchers passed')

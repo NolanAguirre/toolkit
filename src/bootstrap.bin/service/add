@@ -1,9 +1,14 @@
 #!/bin/sh
 ##<help>
 ## service add - Scaffold a service beneath the current repository's services directory.
-## Usage: bootstrap service add <name> --type=<nodejs|node-ml> [--support=http] [--support=fs] [--support=db] [--support=python]
+## Usage: bootstrap service add <name> --type=<nodejs|node-ml|auth> [--support=http] [--support=fs] [--support=db] [--support=python]
 ## List type configuration with bootstrap service type ls. node-ml always includes python.
 ## --type=nodejs --support=python remains available for compatibility.
+## auth: Node.js login service over PostgreSQL; always includes http and db, rejects fs and python.
+## Requires services/openresty (bootstrap openresty add), no nginx configuration, and a fresh
+## postgres database <name> whose sqitch.plan holds only the untouched v1.000.0 template.
+## Writes db/<name>/deploy/v1.000.0.sql (auth schema, register/authenticate with pgcrypto),
+## index.js with npm install pg, HOST=127.0.0.1 and services/openresty/routes/<name>.conf.
 ## Options accept =value or a separate value. --support may be repeated.
 ## Run npm init -y and create env-dir/default and env-dir/$USER with matching values.
 ## Include a simple Makefile with help, install, build and background start targets.
@@ -26,13 +31,14 @@
 ## Passwords belong outside bootstrap state; generated PostgreSQL connections are password-free.
 ## Create the matching database scaffold first with bootstrap db add <name> --support=<backend>.
 ## No database connection, migrations, database port allocation or .env file creation.
-## Requires npm; creates no application code or dependencies beyond the python stubs. Print the service path.
+## Requires npm; creates no application code or dependencies beyond the python stubs and auth service.
+## Print the service path.
 ## Failed scaffolding is cleaned up; a reserved port is retained if publishing fails.
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/bootstrap.sh"
 if [ "$#" -lt 1 ]; then
-    bootstrap_error 'usage: bootstrap service add <name> --type=<nodejs|node-ml> [--support=http] [--support=fs] [--support=db] [--support=python]'
+    bootstrap_error 'usage: bootstrap service add <name> --type=<nodejs|node-ml|auth> [--support=http] [--support=fs] [--support=db] [--support=python]'
 fi
 name=$1
 shift
@@ -68,7 +74,7 @@ while [ "$#" -gt 0 ]; do
     case "$option" in
         --type)
             case "$value" in
-                nodejs|node-ml)
+                nodejs|node-ml|auth)
                     type=$value
                     ;;
                 *)
@@ -104,8 +110,15 @@ case "$type" in
         ;;
     nodejs)
         ;;
+    auth)
+        if [ "$fs" = 1 ] || [ "$python" = 1 ]; then
+            bootstrap_error '--type=auth supports only --support=http and --support=db'
+        fi
+        http=1
+        db=1
+        ;;
     *)
-        bootstrap_error '--type=nodejs or --type=node-ml is required'
+        bootstrap_error '--type=nodejs, --type=node-ml or --type=auth is required'
         ;;
 esac
 if [ -z "$USER" ] || [ "$USER" = . ] || [ "$USER" = .. ] || printf '%s\n' "$USER" | grep -q /; then
@@ -178,6 +191,37 @@ if [ "$db" = 1 ]; then
         bootstrap_error "database registration for $name must contain a single nonempty connection value"
     fi
 fi
+if [ "$type" = auth ]; then
+    if [ "$engine" != postgres ]; then
+        bootstrap_error "--type=auth requires a postgres database; $name is registered as $engine"
+    fi
+    openresty="$root/services/openresty"
+    if [ ! -f "$openresty/nginx.conf" ] || [ ! -d "$openresty/routes" ]; then
+        bootstrap_error '--type=auth requires OpenResty; run bootstrap openresty add first'
+    fi
+    if [ -L "$root/services/nginx" ] || { [ -e "$root/services/nginx" ] && [ ! -d "$root/services/nginx" ]; }; then
+        bootstrap_error '--type=auth requires OpenResty, but services/nginx is configured; remove it first'
+    fi
+    if [ -d "$root/services/nginx" ] && [ -n "$(ls -A -- "$root/services/nginx")" ]; then
+        bootstrap_error '--type=auth requires OpenResty, but services/nginx is configured; remove it first'
+    fi
+    route="$openresty/routes/$name.conf"
+    if [ -e "$route" ] || [ -L "$route" ]; then
+        bootstrap_error "path already exists: $route"
+    fi
+    database="$root/db/$name"
+    fresh="use a fresh database: bootstrap db add $name --support=postgres, with only the untouched v1.000.0 change"
+    if [ ! -f "$database/sqitch.plan" ] || [ ! -f "$database/deploy/v1.000.0.sql" ]; then
+        bootstrap_error "$database is missing its Sqitch plan or v1.000.0 deploy script; $fresh"
+    fi
+    changes=$(grep -v -e '^%' -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$database/sqitch.plan" || true)
+    if [ "$(printf '%s\n' "$changes" | wc -l)" -ne 1 ] || [ "${changes%% *}" != v1.000.0 ]; then
+        bootstrap_error "$database/sqitch.plan has changes beyond v1.000.0; $fresh"
+    fi
+    if ! cmp -s -- "$(dirname "$0")/../template/db/deploy.sql" "$database/deploy/v1.000.0.sql"; then
+        bootstrap_error "$database/deploy/v1.000.0.sql was edited; $fresh"
+    fi
+fi
 if [ "$fs" = 1 ]; then
     if ! printf '%s' "$HOME" | grep -zq '^/'; then
         bootstrap_error 'HOME must be an absolute path for fs support'
@@ -207,9 +251,13 @@ if [ "$python" = 1 ]; then
 fi
 (cd -- "$pending/$name" && npm init -y && npm pkg set 'scripts.start=node index.js') >&2
 template=$(dirname "$0")/../template
-makefile=$type
+makefile=nodejs
+if [ "$type" = auth ]; then
+    cp -- "$template/auth/index.js" "$pending/$name/index.js"
+    (cd -- "$pending/$name" && npm install pg) >&2
+fi
 if [ "$python" = 1 ]; then
-    makefile=$type-python
+    makefile=nodejs-python
     mkdir -p -- "$pending/$name/cli"
     cp -- "$template/python/fsqueue.py" "$template/python/consumer.py" "$template/python/requirements.txt" "$pending/$name/cli/"
     cp -- "$template/python/gitignore" "$pending/$name/.gitignore"
@@ -229,6 +277,11 @@ if [ "$http" = 1 ]; then
     printf '%s\n' "$port" > "$pending/$name/env-dir/default/PORT"
     printf '%s\n' localhost > "$pending/$name/env-dir/default/HOST"
 fi
+if [ "$type" = auth ]; then
+    # OpenResty proxies to 127.0.0.1; localhost may resolve to ::1 for Node.
+    printf '%s\n' 127.0.0.1 > "$pending/$name/env-dir/default/HOST"
+    sed "s/__PORT__/$port/g" "$template/auth/route.conf" > "$pending/route.conf"
+fi
 if [ "$USER" != default ]; then
     for file in "$pending/$name/env-dir/default"/*; do
         [ -f "$file" ] || continue
@@ -239,5 +292,17 @@ fi
 mv -T -n -- "$pending/$name" "$path"
 if [ -d "$pending/$name" ]; then
     bootstrap_error "path appeared during scaffolding: $path"
+fi
+if [ "$type" = auth ]; then
+    # A hard link publishes the route without replacing one created meanwhile.
+    if ! ln -- "$pending/route.conf" "$route"; then
+        bootstrap_error "could not create $route; service retained at $path"
+    fi
+    if ! cmp -s -- "$template/db/deploy.sql" "$database/deploy/v1.000.0.sql"; then
+        bootstrap_error "$database/deploy/v1.000.0.sql changed; service retained at $path; copy $template/auth/deploy.sql manually"
+    fi
+    if ! atomic_write "$database/deploy/v1.000.0.sql" cat "$template/auth/deploy.sql"; then
+        bootstrap_error "could not write the auth migration; service retained at $path"
+    fi
 fi
 printf '%s\n' "$path"

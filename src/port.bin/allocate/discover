@@ -94,7 +94,8 @@ printf '%s\n' "$allocated" | jq -se --arg domain "$domain" --slurpfile found "$s
        | ($f.message | if . == $domain then "." else ltrimstr($domain + "/") end) as $service
        | select((.port != $f.port and
                   (.name == $service or .message == $f.message or
-                   (($service | split("/") | last) == "nginx" and .message == "nginx"))) or
+                   (($service | split("/") | last) as $last
+                    | ($last == "nginx" or $last == "openresty") and .message == $last))) or
                 (.port == $f.port and
                   ((.name != null and .name != $service) or
                    (.name == null and (.message | startswith($domain + "/")) and

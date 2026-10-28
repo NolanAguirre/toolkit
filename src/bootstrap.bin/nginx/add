@@ -4,6 +4,7 @@
 ## Usage: bootstrap nginx add
 ## Run from a registered repository root with an existing port domain.
 ## Accept a missing or empty services/nginx directory; never replace existing configuration.
+## Rejected when services/openresty exists; OpenResty replaces nginx.
 ## Reuse the repo-create nginx template and reserve its preferred port when available.
 ## If that port is occupied, use a free port; preserve all existing application PORT files.
 ## Create env-dir/default and env-dir/ENV_USER (or USER), with HOST=localhost.
@@ -28,6 +29,9 @@ esac
 command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
 if [ -L "$root/services" ] || { [ -e "$root/services" ] && [ ! -d "$root/services" ]; }; then
     bootstrap_error 'services must be a real directory'
+fi
+if [ -e "$root/services/openresty" ] || [ -L "$root/services/openresty" ]; then
+    bootstrap_error "OpenResty is configured at $root/services/openresty; it replaces nginx"
 fi
 path="$root/services/nginx"
 if [ -L "$path" ] || { [ -e "$path" ] && [ ! -d "$path" ]; }; then

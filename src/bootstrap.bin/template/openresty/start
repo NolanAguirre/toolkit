@@ -1,0 +1,72 @@
+#!/bin/sh
+set -e
+cd -- "$(dirname "$0")"
+case "${PORT:-}" in
+    ''|*[!0-9]*)
+        echo 'error: PORT must come from the allocated env-dir configuration' >&2
+        exit 1
+        ;;
+esac
+if [ "${#PORT}" -gt 5 ] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    echo 'error: PORT must be between 1 and 65535' >&2
+    exit 1
+fi
+case "${HOST:-}" in
+    ''|*[!a-zA-Z0-9.-]*)
+        echo 'error: HOST must be an IPv4 address or hostname' >&2
+        exit 1
+        ;;
+esac
+env_user=${ENV_USER:-${USER:-default}}
+memcached=../memcached/env-dir
+if [ -f "$memcached/$env_user/HOST" ]; then
+    memcached_host=$(cat "$memcached/$env_user/HOST")
+else
+    memcached_host=$(cat "$memcached/default/HOST")
+fi
+if [ -f "$memcached/$env_user/PORT" ]; then
+    memcached_port=$(cat "$memcached/$env_user/PORT")
+else
+    memcached_port=$(cat "$memcached/default/PORT")
+fi
+# Lua cosockets do not read /etc/hosts, so memcached needs a literal IPv4 address.
+case "$memcached_host" in
+    ''|*[!0-9.]*)
+        echo 'error: memcached HOST must be an IPv4 address' >&2
+        exit 1
+        ;;
+esac
+case "$memcached_port" in
+    ''|*[!0-9]*)
+        echo 'error: memcached PORT must come from ../memcached/env-dir' >&2
+        exit 1
+        ;;
+esac
+if ! command -v openresty >/dev/null 2>&1; then
+    echo 'error: openresty is not installed or not on PATH' >&2
+    exit 1
+fi
+if ! command -v resty >/dev/null 2>&1; then
+    echo 'error: resty (the OpenResty command-line tool) is required to check lua-resty-session' >&2
+    exit 1
+fi
+if ! resty -e 'if not require("resty.session").init then os.exit(1) end' >/dev/null 2>&1; then
+    echo 'error: lua-resty-session 4.x cannot be loaded; install it with opm get bungle/lua-resty-session' >&2
+    exit 1
+fi
+mkdir -p .runtime/body .runtime/proxy .runtime/fastcgi .runtime/uwsgi .runtime/scgi
+if [ ! -f .runtime/session_secret ]; then
+    (umask 077; head -c 32 /dev/urandom | base64 > .runtime/session_secret.tmp)
+    mv -- .runtime/session_secret.tmp .runtime/session_secret
+fi
+chmod 600 .runtime/session_secret
+SESSION_SECRET=$(cat .runtime/session_secret)
+export SESSION_SECRET
+pending=$(mktemp .runtime/.nginx.XXXXXX)
+trap 'rm -f -- "$pending"' 0
+trap 'exit 1' HUP INT TERM
+sed -e "s/__PORT__/$PORT/g" -e "s/__HOST__/$HOST/g" \
+    -e "s/__MEMCACHED_HOST__/$memcached_host/g" -e "s/__MEMCACHED_PORT__/$memcached_port/g" \
+    nginx.conf > "$pending"
+mv -- "$pending" .runtime/nginx.conf
+exec openresty -p "$(pwd -P)/" -e stderr -c .runtime/nginx.conf -g 'daemon off;'
