@@ -4,7 +4,8 @@
 ## Usage: port allocate default [--strict-nginx] [--service <relative/path>]
 ## Use the current directory name as an existing domain; scan env-dir and env-dev.
 ## Write ENV_USER/PORT (or USER/PORT); preserve existing user or fallback default/PORT.
-## Existing files, including empty ones, are never overwritten. Skip dependency trees.
+## Existing files, including empty ones, are never overwritten. Skip dependency trees
+## and services/nginx.old, the nginx kept by bootstrap openresty add --from-nginx.
 ## Register existing PORT values first; use stable service paths for new allocations.
 ## For nginx or openresty, prefer the block's hundred plus ten times its thousands digit:
 ## 6060, 6160, ..., 7070, 7170, ..., 8080. Use a free block port if unavailable.
@@ -43,7 +44,8 @@ fi
 scan=$(mktemp "$STATE_DIR/.default.XXXXXX")
 trap 'rm -f -- "$scan"' 0
 trap 'exit 1' HUP INT TERM
-find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv \) -prune -o \
+find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv \
+    -o -path ./services/nginx.old \) -prune -o \
     -type d \( -name env-dir -o -name env-dev \) -prune -exec sh -c '
         set -e
         env_user=$1

@@ -1,12 +1,18 @@
 #!/bin/sh
 ##<help>
 ## openresty add - Add the OpenResty proxy and its memcached session store to a repository.
-## Usage: bootstrap openresty add
+## Usage: bootstrap openresty add [--from-nginx]
 ## Run from a registered repository root with an existing port domain.
 ## Rejects a non-empty services/nginx and any existing services/openresty or services/memcached.
+## --from-nginx replaces an existing services/nginx instead: copy its routes/*.conf into
+## services/openresty/routes, move its port reservation to services/openresty (same port),
+## and keep the old proxy untouched at services/nginx.old (port scans skip it).
+## Hand-written nginx.conf contents need manual moving: locations into routes/*.conf,
+## http-level upstreams, caches, gzip and body limits into http.d/*.conf.
+## A failed --from-nginx restores services/nginx and its reservation.
 ## OpenResty reserves the preferred proxy port (as nginx would); memcached pulls a free port.
 ## Create env-dir/default and env-dir/ENV_USER (or USER) for both services.
-## OpenResty: HOST=localhost, routes/*.conf, lua/session.lua (lua-resty-session 4.x, memcached storage).
+## OpenResty: HOST=localhost, routes/*.conf, http.d/*.conf, lua/session.lua (lua-resty-session 4.x, memcached storage).
 ## memcached: HOST=127.0.0.1. Start both with make -C services/<name> start.
 ## The session secret is created by start in .runtime/session_secret; never in env-dir.
 ## Protect a route with access_by_lua_block { require("session").require_session() };
@@ -17,7 +23,19 @@
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/bootstrap.sh"
-[ "$#" -eq 0 ] || bootstrap_error 'usage: bootstrap openresty add'
+from_nginx=0
+case "$*" in
+    '')
+        [ "$#" -eq 0 ] || bootstrap_error 'usage: bootstrap openresty add [--from-nginx]'
+        ;;
+    --from-nginx)
+        [ "$#" -eq 1 ] || bootstrap_error 'usage: bootstrap openresty add [--from-nginx]'
+        from_nginx=1
+        ;;
+    *)
+        bootstrap_error 'usage: bootstrap openresty add [--from-nginx]'
+        ;;
+esac
 root=$(pwd -P)
 bootstrap_repo_entry "$root" >/dev/null
 domain=${root##*/}
@@ -33,11 +51,24 @@ if [ -L "$root/services" ] || { [ -e "$root/services" ] && [ ! -d "$root/service
     bootstrap_error 'services must be a real directory'
 fi
 nginx="$root/services/nginx"
-if [ -L "$nginx" ] || { [ -e "$nginx" ] && [ ! -d "$nginx" ]; }; then
-    bootstrap_error "nginx is configured at $nginx; OpenResty replaces nginx, so remove it first"
-fi
-if [ -d "$nginx" ] && [ -n "$(ls -A -- "$nginx")" ]; then
-    bootstrap_error "nginx is configured at $nginx; OpenResty replaces nginx, so remove it first"
+old="$root/services/nginx.old"
+if [ "$from_nginx" = 1 ]; then
+    if [ -L "$nginx" ] || [ ! -d "$nginx" ]; then
+        bootstrap_error "--from-nginx requires a real directory at $nginx"
+    fi
+    if [ -e "$old" ] || [ -L "$old" ]; then
+        bootstrap_error "path already exists: $old"
+    fi
+    if [ -L "$nginx/routes" ] || { [ -e "$nginx/routes" ] && [ ! -d "$nginx/routes" ]; }; then
+        bootstrap_error "nginx routes must be a real directory: $nginx/routes"
+    fi
+else
+    if [ -L "$nginx" ] || { [ -e "$nginx" ] && [ ! -d "$nginx" ]; }; then
+        bootstrap_error "nginx is configured at $nginx; use --from-nginx to replace it"
+    fi
+    if [ -d "$nginx" ] && [ -n "$(ls -A -- "$nginx")" ]; then
+        bootstrap_error "nginx is configured at $nginx; use --from-nginx to replace it"
+    fi
 fi
 path="$root/services/openresty"
 memcached="$root/services/memcached"
@@ -50,15 +81,24 @@ fi
 mkdir -p -- "$root/services"
 pending=$(mktemp -d "$root/services/.openresty.XXXXXX")
 allocating=0
+renamed=0
+moved=0
+# Undo in reverse order so a failed transition leaves nginx serving as before.
 trap 'rm -rf -- "$pending"; if [ "$allocating" = 1 ]; then
     rm -f -- "$path/env-dir/$env_user/PORT"
     rmdir -- "$path/env-dir/$env_user" "$path/env-dir" "$path" 2>/dev/null || true
+fi
+if [ "$renamed" = 1 ]; then
+    port allocate mv "$domain" services/openresty services/nginx >/dev/null || true
+fi
+if [ "$moved" = 1 ]; then
+    mv -T -n -- "$old" "$nginx" || true
 fi' 0
 trap 'exit 1' HUP INT TERM
 app="$pending/openresty"
 cache="$pending/memcached"
 template="$(dirname "$0")/../template"
-mkdir -p -- "$app/env-dir/default" "$app/env-dir/$env_user" "$app/routes" "$app/lua"
+mkdir -p -- "$app/env-dir/default" "$app/env-dir/$env_user" "$app/routes" "$app/http.d" "$app/lua"
 cp -- "$template/openresty/Makefile" "$app/Makefile"
 cp -- "$template/openresty/start" "$app/start"
 cp -- "$template/openresty/nginx.conf" "$app/nginx.conf"
@@ -66,6 +106,24 @@ cp -- "$template/openresty/gitignore" "$app/.gitignore"
 cp -- "$template/openresty/lua/session.lua" "$app/lua/session.lua"
 mkdir -p -- "$cache/env-dir/default" "$cache/env-dir/$env_user"
 cp -- "$template/memcached/Makefile" "$cache/Makefile"
+if [ "$from_nginx" = 1 ]; then
+    for route in "$nginx"/routes/*.conf; do
+        [ -e "$route" ] || continue
+        cp -p -- "$route" "$app/routes/"
+    done
+    # Register nginx PORT files before the move hides them from discovery.
+    if [ -d "$nginx/env-dir" ] || [ -d "$nginx/env-dev" ]; then
+        port allocate discover >/dev/null
+    fi
+    mv -T -n -- "$nginx" "$old"
+    if [ -d "$nginx" ]; then
+        bootstrap_error "path appeared during scaffolding: $old"
+    fi
+    moved=1
+    if [ -n "$(port allocate mv --missing-ok "$domain" services/nginx services/openresty)" ]; then
+        renamed=1
+    fi
+fi
 # Only the real service path is allocated; staging has no PORT files to discover.
 mkdir -p -- "$path/env-dir/$env_user"
 allocating=1
@@ -89,4 +147,6 @@ mv -T -n -- "$app" "$path"
 if [ -d "$app" ]; then
     bootstrap_error "path appeared during scaffolding: $path; memcached retained at $memcached"
 fi
+renamed=0
+moved=0
 printf '%s\n' "$path" "$memcached"

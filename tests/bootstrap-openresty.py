@@ -32,8 +32,8 @@ with tempfile.TemporaryDirectory() as tmp:
         call('port', 'allocate', 'create', name, '-s', str(start), '-c', str(count))
         return path
 
-    def add(path, **kwargs):
-        return call('bootstrap', 'openresty', 'add', cwd=path, **kwargs)
+    def add(path, *args, **kwargs):
+        return call('bootstrap', 'openresty', 'add', *args, cwd=path, **kwargs)
 
     call('bootstrap.bin/setup')
     call('port.bin/setup')
@@ -57,6 +57,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert (memcached/'env-dir/tester/PORT').read_text() == memcached_port
     assert (memcached/'env-dir/default/HOST').read_text() == '127.0.0.1\n'
     assert (openresty/'routes').is_dir() and not list((openresty/'routes').iterdir())
+    assert (openresty/'http.d').is_dir() and not list((openresty/'http.d').iterdir())
     for filename in ('Makefile', 'start', 'nginx.conf', 'lua/session.lua'):
         assert (openresty/filename).read_bytes() == (template/'openresty'/filename).read_bytes()
     assert (openresty/'.gitignore').read_text() == '/.runtime/\n'
@@ -67,7 +68,11 @@ with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(['make', '-s', '-C', str(directory), 'help'], check=True, capture_output=True)
 
     # The start script fails clearly without OpenResty and keeps the secret out of env-dir.
-    started = subprocess.run(['make', '-s', '-C', str(openresty), 'start'], env=dict(env, PATH='/usr/bin:/bin'),
+    bare = root/'bare-bin'
+    bare.mkdir()
+    for tool in ('make', 'envdir', 'sh', 'dirname', 'cat'):
+        (bare/tool).symlink_to(shutil.which(tool))
+    started = subprocess.run(['make', '-s', '-C', str(openresty), 'start'], env=dict(env, PATH=str(bare)),
                              text=True, capture_output=True, timeout=30)
     assert started.returncode != 0 and 'openresty is not installed' in started.stderr, started.stderr
     assert not list(openresty.glob('env-dir/*/SESSION_SECRET'))
@@ -93,6 +98,66 @@ with tempfile.TemporaryDirectory() as tmp:
     assert index.read_bytes() == before
     assert not (configured/'services/openresty').exists()
     assert not (configured/'services/memcached').exists()
+
+    # --from-nginx keeps the proxy port, copies routes and leaves nginx.old intact.
+    def tree(path):
+        return {str(p.relative_to(path)): p.read_bytes() if p.is_file() else None
+                for p in sorted(path.rglob('*'))}
+
+    def allocation(port):
+        return [line for line in index.read_text().splitlines() if f'"port":{port},' in line]
+
+    nginx = configured/'services/nginx'
+    (nginx/'routes/app.conf').write_text('location /app/ { return 204; }\n')
+    (nginx/'routes/notes.txt').write_text('not a route\n')
+    original = tree(nginx)
+    moved = configured/'services/openresty'
+    add(configured, '--from-nginx')
+    assert not nginx.exists()
+    assert tree(configured/'services/nginx.old') == original
+    assert (moved/'env-dir/default/PORT').read_text() == '6860\n'
+    assert (moved/'env-dir/tester/PORT').read_text() == '6860\n'
+    assert sorted(p.name for p in (moved/'routes').iterdir()) == ['app.conf']
+    assert (moved/'routes/app.conf').read_text() == 'location /app/ { return 204; }\n'
+    assert '"name":"services/openresty"' in allocation(6860)[0]
+    assert (configured/'services/memcached/env-dir/default/PORT').read_text() == '6800\n'
+    call('port', 'allocate', 'discover', cwd=configured)
+    assert '"name":"services/openresty"' in allocation(6860)[0]
+
+    # Re-running never overwrites the transition.
+    before = index.read_bytes()
+    (moved/'routes/app.conf').write_text('# edited\n')
+    assert 'already exists' in add(configured, '--from-nginx', ok=False)
+    assert 'already exists' in add(configured, ok=False)
+    assert index.read_bytes() == before
+    assert (moved/'routes/app.conf').read_text() == '# edited\n'
+    assert tree(configured/'services/nginx.old') == original
+
+    # A hand-written nginx keeps a legacy "nginx" reservation.
+    legacy = repo('legacy', 7200)
+    (legacy/'services/nginx').mkdir()
+    (legacy/'services/nginx/nginx.conf').write_text('# listen 7270\n')
+    call('port', 'allocate', 'set', 'legacy', '7270', '-m', 'nginx')
+    add(legacy, '--from-nginx')
+    assert (legacy/'services/openresty/env-dir/default/PORT').read_text() == '7270\n'
+    assert '"name":"services/openresty"' in allocation(7270)[0]
+    assert (legacy/'services/nginx.old/nginx.conf').read_text() == '# listen 7270\n'
+
+    # A failed transition restores nginx and its reservation.
+    cramped = repo('cramped', 7300, count=1)
+    call('bootstrap', 'nginx', 'add', cwd=cramped)
+    nginx = cramped/'services/nginx'
+    original = tree(nginx)
+    before = allocation(7300)
+    add(cramped, '--from-nginx', ok=False)
+    assert tree(nginx) == original
+    assert allocation(7300) == before and '"name":"services/nginx"' in before[0]
+    for name in ('nginx.old', 'openresty', 'memcached'):
+        assert not (cramped/'services'/name).exists()
+    assert not list((cramped/'services').glob('.openresty.*'))
+
+    # --from-nginx needs an nginx to replace.
+    assert '--from-nginx requires' in add(repo('bare', 7400), '--from-nginx', ok=False)
 
     # A leftover memcached directory blocks the whole command.
     leftover = repo('leftover', 6900)

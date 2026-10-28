@@ -1,14 +1,23 @@
 #!/bin/sh
 ##<help>
 ## allocate mv - Rename a service allocation while keeping its port.
-## Usage: port allocate mv <domain> <old-name> <new-name>
+## Usage: port allocate mv [--missing-ok] <domain> <old-name> <new-name>
 ## Keep the port and custom descriptions; update generated domain/service descriptions.
-## Accept discovered services too. Reject conflicts. Print the port; do not move files.
+## Accept discovered services too, including the legacy "nginx" proxy description.
+## --missing-ok prints nothing and succeeds when no allocation matches old-name.
+## Reject conflicts. Print the port; do not move files.
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/ports.sh"
+missing_ok=0
+case "${1:-}" in
+    --missing-ok)
+        missing_ok=1
+        shift
+        ;;
+esac
 if [ "$#" -ne 3 ]; then
-    port_error 'usage: port allocate mv <domain> <old-name> <new-name>'
+    port_error 'usage: port allocate mv [--missing-ok] <domain> <old-name> <new-name>'
 fi
 domain=$1
 old_name=$2
@@ -27,17 +36,23 @@ records=$(
 $records
 RECORDS
 )
-record=$(printf '%s\n' "$records" | jq -sc --arg domain "$domain" --arg old "$old_name" --arg new "$new_name" '
+record=$(printf '%s\n' "$records" | jq -sc --arg domain "$domain" --arg old "$old_name" --arg new "$new_name" \
+    --argjson missing_ok "$missing_ok" '
     def description($name): if $name == "." then $domain else $domain + "/" + $name end;
-    def matches($name): .name == $name or (.name == null and .message == description($name));
+    def legacy($name): ($name | split("/") | last) as $last
+        | if $last == "nginx" or $last == "openresty" then $last else null end;
+    def generated($name): .message == description($name) or .message == legacy($name);
+    def matches($name): .name == $name or (.name == null and generated($name));
     . as $records | map(select(matches($old)))
-    | if length != 1 then error("source allocation missing or ambiguous") else .[0] end
+    | if length == 0 and $missing_ok == 1 then empty
+      elif length != 1 then error("source allocation missing or ambiguous") else .[0] end
     | . as $source
     | if any($records[]; .port != $source.port and matches($new))
       then error("destination allocation already exists") else . end
     | .name = $new
-    | if .message == description($old) then .message = description($new) else . end
+    | if generated($old) then .message = description($new) else . end
 ') || exit 1
+[ -n "$record" ] || exit 0
 port=$(printf '%s\n' "$record" | jq -r '.port')
 # Commit identity first. Readers ignore stale metadata if publication is interrupted.
 atomic_write "$PORT_INDEX" jq -Rr --argjson record "$record" \

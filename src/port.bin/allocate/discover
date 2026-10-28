@@ -5,7 +5,7 @@
 ## The current directory's basename must be an existing port domain.
 ## Search env-dir and env-dev; use ENV_USER (or USER), then default if PORT is missing.
 ## Skip missing or empty PORT files. Never execute environment files or modify them.
-## Skip .git, node_modules, .venv and venv directories; do not follow directory symlinks.
+## Skip .git, node_modules, .venv, venv and services/nginx.old; do not follow directory symlinks.
 ## Validate all ports and ownership before writing; repeated discovery is safe.
 ## Store domain/relative/service as the message and print each reserved port.
 ## Existing allocations are retained, including those no longer found on disk.
@@ -41,7 +41,8 @@ fi
 scan=$(mktemp "$STATE_DIR/.discover.XXXXXX")
 trap 'rm -f -- "$scan"' 0
 trap 'exit 1' HUP INT TERM
-find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv \) -prune -o \
+find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv \
+    -o -path ./services/nginx.old \) -prune -o \
     -type d \( -name env-dir -o -name env-dev \) -prune -exec sh -c '
         set -e
         env_user=$1
