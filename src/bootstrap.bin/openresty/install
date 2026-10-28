@@ -1,0 +1,43 @@
+#!/bin/sh
+##<help>
+## openresty install - Install OpenResty, memcached and their scaffold dependencies on Ubuntu.
+## Usage: bootstrap openresty install
+## Add the official OpenResty apt repository, then install openresty, openresty-resty,
+## openresty-opm, memcached and daemontools (envdir).
+## Install lua-resty-session 4.x with opm for the OpenResty session store.
+## Stop and disable the system openresty and memcached services; projects start their own
+## instances with make -C services/<name> start.
+## Requires sudo. Safe to re-run.
+##</help>
+set -e
+[ "$#" -eq 0 ] || {
+    echo 'usage: bootstrap openresty install' >&2
+    exit 1
+}
+. /etc/os-release
+[ "$ID" = ubuntu ] || {
+    echo 'error: only Ubuntu is supported' >&2
+    exit 1
+}
+case "$(dpkg --print-architecture)" in
+    amd64)
+        repo=http://openresty.org/package/ubuntu
+        ;;
+    arm64)
+        repo=http://openresty.org/package/arm64/ubuntu
+        ;;
+    *)
+        echo 'error: unsupported architecture' >&2
+        exit 1
+        ;;
+esac
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends wget gnupg ca-certificates lsb-release
+wget -O - https://openresty.org/package/pubkey.gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/openresty.gpg
+echo "deb [signed-by=/usr/share/keyrings/openresty.gpg] $repo $VERSION_CODENAME main" | sudo tee /etc/apt/sources.list.d/openresty.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y openresty openresty-resty openresty-opm memcached daemontools
+sudo systemctl disable --now openresty
+sudo systemctl disable --now memcached
+sudo opm get bungle/lua-resty-session
+printf 'OpenResty and memcached installed.\n'
