@@ -24,6 +24,46 @@ case "$command" in
         ;;
 esac
 command -v jq >/dev/null 2>&1 || remote_error 'jq is required for remote target configuration'
+# Pull target selection out first so positional checks below stay unchanged.
+REMOTE_TO=
+REMOTE_TARGET_NAME=
+to_given=0
+name_given=0
+if [ "$registry" = 0 ]; then
+    count=$#
+    while [ "$count" -gt 0 ]; do
+        case "$1" in
+            --to|--name)
+                [ "$count" -ge 2 ] || remote_error "$1 requires a value"
+                if [ "$1" = --to ]; then
+                    case "$action" in
+                        remote-rm|remote-deploy|remote-status|remote-releases|remote-setup) ;;
+                        *) remote_error "--to is not supported by ${action#remote-}" ;;
+                    esac
+                    [ "$to_given" = 0 ] || remote_error '--to may be given once'
+                    [ -n "$2" ] || remote_error '--to requires target names'
+                    to_given=1
+                    REMOTE_TO=$2
+                else
+                    case "$action" in
+                        remote-create|remote-edit|remote-use) ;;
+                        *) remote_error "--name is not supported by ${action#remote-}" ;;
+                    esac
+                    [ "$name_given" = 0 ] || remote_error '--name may be given once'
+                    name_given=1
+                    REMOTE_TARGET_NAME=$2
+                fi
+                shift 2
+                count=$((count - 2))
+                ;;
+            *)
+                set -- "$@" "$1"
+                shift
+                count=$((count - 1))
+                ;;
+        esac
+    done
+fi
 case "$action" in
     remote-ls)
         [ "$#" -eq 0 ] || remote_error 'usage: remote ls'
@@ -32,7 +72,7 @@ case "$action" in
         ;;
     remote-create|remote-edit|remote-load)
         [ -d "$REMOTE_STATE/connections" ] || remote_error 'run toolkit setup remote to initialize JSON connection settings'
-        [ "$#" -ge 2 ] || remote_error 'usage: remote create|edit <repo> <host-or-connection> [--user user] [--port port] [--identity-file path]'
+        [ "$#" -ge 2 ] || remote_error 'usage: remote create|edit <repo> <host-or-connection> [--name target] [--user user] [--port port] [--identity-file path]'
         repo=$1
         connection=$2
         REMOTE_TARGET=$connection
@@ -93,22 +133,23 @@ case "$action" in
         export REMOTE_TARGET REMOTE_USER REMOTE_PORT REMOTE_IDENTITY
         ;;
     remote-use)
-        [ "$#" -eq 2 ] || remote_error 'usage: remote use <repo> <host-name>'
+        [ "$#" -eq 2 ] || remote_error 'usage: remote use <repo> <host-name> [--name target]'
         remote_token "$2" || remote_error 'invalid host name'
+        [ "$name_given" = 1 ] || REMOTE_TARGET_NAME=$2
         ;;
     remote-rm|remote-status|remote-releases)
-        [ "$#" -eq 1 ] || remote_error 'usage: remote rm|status|releases <repo>'
+        [ "$#" -eq 1 ] || remote_error 'usage: remote rm|status|releases <repo> [--to target,...]'
         ;;
     remote-deploy)
         case "$#" in
             2) release_directory=$2 ;;
             3) release_directory=$3 ;;
-            *) remote_error 'usage: remote deploy <repo> [service] <release-directory>' ;;
+            *) remote_error 'usage: remote deploy <repo> [service] <release-directory> [--to target,...]' ;;
         esac
         [ -d "$release_directory" ] && [ ! -L "$release_directory" ] || remote_error 'release must be a real directory'
         ;;
     remote-setup)
-        [ "$#" -ge 2 ] || remote_error 'usage: remote setup <step> <repo> [service|--all]'
+        [ "$#" -ge 2 ] || remote_error 'usage: remote setup <step> <repo> [service|--all] [--to target,...]'
         case "$1" in
             service)
                 [ "$#" -eq 3 ] || remote_error 'usage: remote setup service <repo> <service|--all>'
@@ -139,10 +180,17 @@ else
 fi
 remote_token "$REMOTE_REPO" || remote_error 'repo must be a registered bootstrap name'
 export REMOTE_BIN REMOTE_STATE REMOTE_REPO
-REMOTE_CONFIG="$REMOTE_STATE/connections/$REMOTE_REPO.json"
-export REMOTE_CONFIG
+case "$action" in
+    remote-create|remote-edit|remote-use)
+        [ -n "$REMOTE_TARGET_NAME" ] || REMOTE_TARGET_NAME=default
+        remote_token "$REMOTE_TARGET_NAME" || remote_error 'invalid target name'
+        REMOTE_CONFIG=$(remote_target_path "$REMOTE_TARGET_NAME")
+        export REMOTE_CONFIG REMOTE_TARGET_NAME
+        ;;
+esac
 # Removing a target must also work after its repository has been unregistered.
 if [ "$action" = remote-rm ]; then
+    export REMOTE_TO
     exec "$command" "$@"
 fi
 [ -f "$UTIL_PATH/bootstrap/lock" ] || remote_error 'run toolkit setup bootstrap first'
@@ -157,17 +205,14 @@ case "$action" in
         exec "$command" "$@"
         ;;
 esac
-if [ -f "$REMOTE_CONFIG" ]; then
-    remote_target_load "$REMOTE_CONFIG"
-elif [ -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
-    remote_target_load "$REMOTE_STATE/targets/$REMOTE_REPO"
-else
-    remote_error 'target missing; use remote create <repo> <host-or-connection> [--user user]'
-fi
-command -v ssh >/dev/null 2>&1 || remote_error 'ssh is required'
 REMOTE_MANIFEST=$(mktemp "$REMOTE_STATE/.services.XXXXXX")
-trap 'rm -f -- "$REMOTE_MANIFEST"' 0
+REMOTE_TARGETS=
+trap 'rm -f -- "$REMOTE_MANIFEST" ${REMOTE_TARGETS:+"$REMOTE_TARGETS"}' 0
 trap 'exit 1' HUP INT TERM
+REMOTE_TARGETS=$(mktemp "$REMOTE_STATE/.targets.XXXXXX")
+# Every selected target must exist and load before any SSH.
+remote_targets_select "$REMOTE_TO"
+command -v ssh >/dev/null 2>&1 || remote_error 'ssh is required'
 selected=--all
 if [ "$action" = remote-setup ] && [ "$1" = service ]; then
     selected=$3
@@ -271,6 +316,6 @@ if [ "$selected" != --all ]; then
 fi
 [ -s "$REMOTE_MANIFEST" ] || remote_error 'no matching services in repository'
 
-export REMOTE_TARGET REMOTE_USER REMOTE_PORT REMOTE_IDENTITY REMOTE_MANIFEST
+export REMOTE_MANIFEST REMOTE_TARGETS
 # Keep the locks and cleanup trap in this parent until SSH and all children exit.
 "$command" "$@"

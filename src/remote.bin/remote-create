@@ -1,17 +1,17 @@
 #!/bin/sh
 ##<help>
-## create - Create the SSH target for a bootstrap repository.
-## Usage: remote create <repo> <host-or-connection> [--user user] [--port port] [--identity-file path]
+## create - Add an SSH target to a bootstrap repository.
+## Usage: remote create <repo> <host-or-connection> [--name target] [--user user] [--port port] [--identity-file path]
+## Target name defaults to default; fail if that target already exists. A repo may have several targets.
 ## Accept IP/DNS hosts, user@host and ssh://user@host:port. Use brackets for IPv6 with a port.
 ## User defaults to the local account and port to 22; connection values and options override defaults.
 ## Connect directly without SSH config. Default keys/agent are used if identity is omitted.
 ## Save connection settings locally; do not contact the host or store passwords/private keys.
 ##</help>
 set -e
+. "$REMOTE_BIN/../lib/remote.sh"
 . "$REMOTE_BIN/../lib/files.sh"
-if [ -e "$REMOTE_CONFIG" ] || [ -e "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
-    echo 'error: target already exists; use remote edit' >&2
-    exit 1
+if [ -e "$REMOTE_CONFIG" ]; then
+    remote_error "target $REMOTE_TARGET_NAME already exists; use remote edit"
 fi
-atomic_write "$REMOTE_CONFIG" jq -n --arg host "$REMOTE_TARGET" --arg user "$REMOTE_USER" --arg port "$REMOTE_PORT" --arg identity "$REMOTE_IDENTITY" \
-    '{host: $host, user: $user, port: ($port | tonumber), identityFile: (if $identity == "" then null else $identity end)}'
+remote_connection_write

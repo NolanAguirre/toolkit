@@ -7,7 +7,7 @@ help:
 	@echo 'deployment.help       Show deployment commands'
 	@echo 'deployment.build      Build production assets locally'
 	@echo 'deployment.package    Package built assets and server code; never local state'
-	@echo 'deployment.push       Build, package and deploy to the registered remote'
+	@echo 'deployment.push       Build, package and deploy to all remote targets (TO=a,b for a subset)'
 	@echo 'deployment.install    Install host prerequisites (sudo)'
 	@echo 'deployment.setup      Prepare application state and runners (sudo)'
 	@echo 'deployment.migrate    Back up and deploy database migrations while stopped (sudo)'
@@ -34,7 +34,7 @@ package:
 push:
 	$(MAKE) build
 	$(MAKE) package
-	remote deploy __REPO__ "../.release/$(RELEASE)"
+	remote deploy __REPO__ "../.release/$(RELEASE)" $(if $(TO),--to $(TO))
 
 install:
 	./validate install

@@ -1,8 +1,10 @@
 #!/bin/sh
 ##<help>
 ## deploy - Upload prepared service artifacts to their generated bin/deploy commands.
-## Usage: remote deploy <repo> <release-directory>
-## Usage: remote deploy <repo> <service> <release-directory>
+## Usage: remote deploy <repo> <release-directory> [--to target,...]
+## Usage: remote deploy <repo> <service> <release-directory> [--to target,...]
+## Package once, then deploy to all targets (or the --to subset) in parallel.
+## Output lines are prefixed with the target name; stderr ends with ok/failed <target> per target.
 ## Service names come from services/<folder>/remote-services when present, otherwise the folder name.
 ## A repository bundle contains <service>/run and that service's packaged files.
 ## A single-service directory contains run and its packaged files directly.
@@ -72,4 +74,4 @@ while IFS= read -r entry; do
     set -- "$@" "${entry%:*}.tar.gz" "${entry%:*}.release"
 done < "$REMOTE_MANIFEST"
 tar -czf "$REMOTE_ARCHIVE" -C "$upload" "$@"
-remote_send deploy
+remote_each deploy

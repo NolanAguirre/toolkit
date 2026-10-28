@@ -1,17 +1,39 @@
 #!/bin/sh
 ##<help>
-## rm - Remove a local SSH target registration.
-## Usage: remote rm <repo>
-## Leave the repository and remote host untouched.
+## rm - Remove local SSH target registrations of a repository.
+## Usage: remote rm <repo> [--to target,...]
+## Remove the named targets; --to is required when the repo has more than one target.
+## Leave the repository and remote hosts untouched.
 ##</help>
 set -e
-if [ ! -f "$REMOTE_CONFIG" ] && [ ! -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
-    echo 'error: target missing' >&2
-    exit 1
+. "$REMOTE_BIN/../lib/remote.sh"
+names=$REMOTE_TO
+case "$names" in
+    *[!a-zA-Z0-9.,_-]*)
+        remote_error 'invalid target name'
+        ;;
+esac
+if [ -z "$names" ]; then
+    names=$(remote_target_names)
+    [ -n "$names" ] || remote_error 'target missing'
+    [ "$(printf '%s\n' "$names" | wc -l)" -eq 1 ] || remote_error 'repo has several targets; choose them with --to target,...'
 fi
-if [ -f "$REMOTE_CONFIG" ]; then
-    rm -- "$REMOTE_CONFIG"
-fi
-if [ -f "$REMOTE_STATE/targets/$REMOTE_REPO" ]; then
-    rm -- "$REMOTE_STATE/targets/$REMOTE_REPO"
+names=$(printf '%s\n' "$names" | tr ',' '\n')
+printf '%s\n' "$names" | awk '{ if (seen[$0]++) exit 1 }' || remote_error 'duplicate target name'
+# Check every target before removing any.
+for name in $names; do
+    remote_token "$name" || remote_error "invalid target name: $name"
+    [ -f "$(remote_target_path "$name")" ] || remote_error "target missing: $name"
+done
+directory="$REMOTE_STATE/connections/$REMOTE_REPO"
+for name in $names; do
+    if [ -d "$directory" ]; then
+        rm -- "$directory/$name.json"
+    else
+        rm -f -- "$directory.json" "$REMOTE_STATE/targets/$REMOTE_REPO"
+    fi
+done
+# An empty directory would hide nothing but still mark the repo as migrated.
+if [ -d "$directory" ]; then
+    rmdir -- "$directory" 2>/dev/null || true
 fi

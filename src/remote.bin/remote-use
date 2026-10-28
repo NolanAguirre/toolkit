@@ -1,9 +1,9 @@
 #!/bin/sh
 ##<help>
 ## use - Copy a named host's SSH settings into a repository target.
-## Usage: remote use <repo> <host-name>
-## Create or replace the repository target. Do not connect to the host.
-## Later host registry edits/removal do not change this saved target.
+## Usage: remote use <repo> <host-name> [--name target]
+## Target name defaults to the host name. Add the target, or replace one with the same name; other targets stay.
+## Do not connect to the host. Later host registry edits/removal do not change this saved target.
 ##</help>
 set -e
 . "$REMOTE_BIN/../lib/remote.sh"

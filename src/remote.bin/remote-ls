@@ -1,23 +1,33 @@
 #!/bin/sh
 ##<help>
-## ls - List repo, host, user, port and optional identity path as tab-separated values.
+## ls - List repo, target, host, user, port and optional identity path as tab-separated values.
 ## Usage: remote ls
-## Read local target state without contacting hosts.
-## Legacy aliases have only repo and alias columns; replace them with remote edit.
+## Read local target state without contacting hosts. Legacy single-target files are listed as target default.
+## Legacy aliases have only repo, target and alias columns; replace them with remote edit.
 ##</help>
 set -e
 . "$REMOTE_BIN/../lib/remote.sh"
 for target in "$REMOTE_STATE"/targets/*; do
     [ -f "$target" ] || continue
     name=${target##*/}
-    [ ! -f "$REMOTE_STATE/connections/$name.json" ] || continue
+    [ ! -f "$REMOTE_STATE/connections/$name.json" ] && [ ! -d "$REMOTE_STATE/connections/$name" ] || continue
     remote_target_load "$target"
-    printf '%s\t%s\n' "$name" "$REMOTE_TARGET"
+    printf '%s\tdefault\t%s\n' "$name" "$REMOTE_TARGET"
 done
 for target in "$REMOTE_STATE"/connections/*.json; do
     [ -f "$target" ] || continue
     name=${target##*/}
     name=${name%.json}
+    [ ! -d "$REMOTE_STATE/connections/$name" ] || continue
     remote_target_load "$target"
-    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$REMOTE_TARGET" "$REMOTE_USER" "$REMOTE_PORT" "$REMOTE_IDENTITY"
+    printf '%s\tdefault\t%s\t%s\t%s\t%s\n' "$name" "$REMOTE_TARGET" "$REMOTE_USER" "$REMOTE_PORT" "$REMOTE_IDENTITY"
+done
+for target in "$REMOTE_STATE"/connections/*/*.json; do
+    [ -f "$target" ] || continue
+    name=${target##*/}
+    name=${name%.json}
+    repo=${target%/*}
+    repo=${repo##*/}
+    remote_target_load "$target"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" "$name" "$REMOTE_TARGET" "$REMOTE_USER" "$REMOTE_PORT" "$REMOTE_IDENTITY"
 done

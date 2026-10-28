@@ -162,10 +162,15 @@ else: sys.exit(1)
     local_sync.chmod(0o755)
     ssh = installed/'ssh' 
     ssh.write_text('''#!/usr/bin/env python3
-import os, pathlib, subprocess, sys
-root = pathlib.Path(os.environ['MOCK_HOST'])
+import json, os, pathlib, subprocess, sys, time
+# MOCK_HOSTS maps extra target hosts to their own mock host roots.
+hosts = json.loads(os.environ.get('MOCK_HOSTS', '{}'))
+target = sys.argv[-2]
+root = pathlib.Path(hosts.get(target, os.environ['MOCK_HOST']))
 expected = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10']
-if '-F' in sys.argv:
+if target in hosts:
+    expected += ['-F', '/dev/null', '-l', 'deployer', '-p', '22', target, 'sudo -n sh -s']
+elif '-F' in sys.argv:
     expected += ['-F', '/dev/null', '-l', 'deployer', '-p', '2222', '-o', 'IdentitiesOnly=yes', '-i', str(root.parent/'key with spaces')]
     expected += ['192.0.2.10', 'sudo -n sh -s']
 else:
@@ -174,10 +179,18 @@ assert sys.argv[1:] == expected, sys.argv
 script = sys.stdin.read()
 with (root/'ssh-calls').open('a') as log: log.write('call\\n')
 (root/'last-script').write_text(script)
-if os.environ.get('FAIL_SSH'): sys.exit(255)
+if os.environ.get('FAIL_SSH') or os.environ.get('FAIL_SSH_HOST') == target: sys.exit(255)
+# Every target must arrive before any proceeds, proving targets run in parallel.
+barrier = os.environ.get('MOCK_SSH_BARRIER')
+if barrier:
+    (pathlib.Path(barrier)/target).write_text('')
+    deadline = time.monotonic() + 10
+    while len(list(pathlib.Path(barrier).iterdir())) < int(os.environ['MOCK_SSH_BARRIER_COUNT']):
+        if time.monotonic() > deadline: sys.exit(254)
+        time.sleep(.02)
 script = script.replace('/opt/', str(root/'opt') + '/').replace('/var/run', str(root/'var/run')).replace('/var/service', str(root/'var/service')).replace('/run/systemd/system', str(root/'run/systemd/system')).replace('/etc/systemd/system', str(root/'etc/systemd/system')).replace('/usr/local/etc/rc.d/s6', str(root/'usr/local/etc/rc.d/s6'))
 script = script.replace('PATH="/usr/local/sbin:/usr/local/bin:$PATH"', 'PATH="$PATH"')
-env = dict(os.environ, PATH=os.environ['MOCK_BIN'] + ':' + os.environ['PATH'])
+env = dict(os.environ, MOCK_HOST=str(root), PATH=os.environ['MOCK_BIN'] + ':' + os.environ['PATH'])
 sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returncode)
 ''')
     ssh.chmod(0o755)
@@ -186,11 +199,14 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
                MOCK_HOST=str(host), MOCK_BIN=str(mocks),
                PATH=str(installed) + ':' + os.environ['PATH'])
 
-    def call(tool, *args, ok=True, extra=None):
+    def run(tool, *args, ok=True, extra=None):
         result = subprocess.run([str(installed/tool), *args], env=dict(env, **(extra or {})),
                                 text=True, capture_output=True, timeout=60)
         assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
-        return result.stdout.strip()
+        return result
+
+    def call(tool, *args, ok=True, extra=None):
+        return run(tool, *args, ok=ok, extra=extra).stdout.strip()
 
     def remote(*args, **kwargs):
         return call('remote', *args, **kwargs)
@@ -220,7 +236,7 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     remote('create', 'demo', 'user:password@host', ok=False, extra={'TOOLKIT_HIST_LOCK': ''})
     remote('create', 'demo', '192.0.2.10', '--user', 'deployer', '--port', '2222', '--identity-file', str(key), extra={'TOOLKIT_HIST_LOCK': ''})
     assert not (root/'state/history-called').exists()
-    target = root/'state/remote/connections/demo.json'
+    target = root/'state/remote/connections/demo/default.json'
     expected = {'host': '192.0.2.10', 'user': 'deployer', 'port': 2222, 'identityFile': str(key)}
     assert json.loads(target.read_text()) == expected
     assert target.stat().st_mode & 0o777 == 0o600
@@ -256,7 +272,7 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     remote('rm', 'demo')
     legacy = root/'state/remote/targets/demo'
     legacy.write_text('test-pi\n')
-    assert remote('ls') == 'demo\ttest-pi'
+    assert remote('ls') == 'demo\tdefault\ttest-pi'
     remote('edit', 'demo', 'user@changed.example', ok=False, extra={'FAIL_LOCAL_SYNC': '1'})
     assert legacy.read_text() == 'test-pi\n'
     remote('setup', 'all', 'demo', 'extra', ok=False)
@@ -267,7 +283,8 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     assert not (host/'var/service-dir').exists()
     remote('edit', 'demo', 'ssh://deployer@192.0.2.10:2222', '--identity-file', str(key))
     assert json.loads(target.read_text()) == expected
-    assert remote('ls') == f'demo\t192.0.2.10\tdeployer\t2222\t{key}'
+    assert not legacy.exists()
+    assert remote('ls') == f'demo\tdefault\t192.0.2.10\tdeployer\t2222\t{key}'
     remote('setup', 'users', 'demo')
     users_before = (host/'users.json').read_bytes()
     remote('setup', 'users', 'demo')
@@ -349,7 +366,8 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     assert not list(base('api').glob('.atomic-write.*'))
     remote('status', 'demo', ok=False, extra={'FAIL_SUPERVISOR': '1'})
     remote('status', 'demo', ok=False, extra={'FAIL_SSH': '1'})
-    assert not list((root/'state/remote').glob('.ssh.*'))
+    assert not list((root/'state/remote').glob('.each.*'))
+    assert not list((root/'state/remote').glob('.targets.*'))
     assert not list((root/'state/remote').glob('.services.*'))
     (base('api')/'env/PORT').write_text('9999\n')
     assert 'port-drift' in remote('status', 'demo', ok=False)
@@ -444,8 +462,9 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
         assert running['pid'] == str(process.pid)
         assert running['archive_sha256'] == expected_hash
         status = remote('releases', 'demo', extra={'MOCK_SUPERVISED_PID': str(process.pid)})
-        assert 'api\truntime\tidentity\tverified' in status
-        assert f'api\trunning\tarchive_sha256\t{expected_hash}' in status
+        assert 'default\tapi\truntime\tidentity\tverified' in status.splitlines()
+        assert f'default\tapi\trunning\tarchive_sha256\t{expected_hash}' in status.splitlines()
+        assert all(line.startswith('default\t') for line in status.splitlines())
         # Selecting a new release while the old process lives keeps its old identity.
         remote('deploy', 'demo', 'api', str(release/'api'))
         assert current.resolve() != published
@@ -606,4 +625,74 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
         assert sorted(pool.map(lambda _: create(), range(2))) == [0, 1]
     assert lock.stat().st_ino == inode
     assert json.loads(target.read_text()) == {'host': 'example.com', 'user': 'user', 'port': 22, 'identityFile': None}
+    # Named targets: each has its own mock host and release history.
+    remote('rm', 'demo')
+    assert not (root/'state/remote/connections/demo').exists()
+    hosts = {}
+    for name in ('pi', 'deino'):
+        machine = root/f'host-{name}'
+        (machine/'var/run').mkdir(parents=True)
+        (machine/'opt').mkdir()
+        (machine/'var/service/.s6-svscan').mkdir(parents=True)
+        os.mkfifo(machine/'var/service/.s6-svscan/control')
+        hosts[name] = machine
+    multi = {'MOCK_HOSTS': json.dumps({f'{name}.example': str(machine) for name, machine in hosts.items()})}
+    remote('create', 'demo', 'deployer@pi.example', '--name', 'pi')
+    remote('create', 'demo', '--name', 'deino', 'deployer@deino.example')
+    remote('create', 'demo', 'deployer@pi.example', '--name', 'pi', ok=False)
+    remote('create', 'demo', 'deployer@pi.example', '--name', 'bad/name', ok=False)
+    remote('status', 'demo', '--name', 'pi', ok=False)
+    remote('ls', '--to', 'pi', ok=False)
+    assert sorted(line.split('\t')[:5] for line in remote('ls').splitlines()) == [
+        ['demo', 'deino', 'deino.example', 'deployer', '22'], ['demo', 'pi', 'pi.example', 'deployer', '22']]
+    remote('setup', 'all', 'demo', extra=multi)
+    status = remote('status', 'demo', '--to', 'pi', extra=multi)
+    assert status and all(line.startswith('pi\t') for line in status.splitlines())
+    # Two targets deploy in parallel with prefixed output and a result line per target.
+    barrier = root/'barrier'
+    barrier.mkdir()
+    result = run('remote', 'deploy', 'demo', str(release), extra=dict(multi, MOCK_SSH_BARRIER=str(barrier), MOCK_SSH_BARRIER_COUNT='2'))
+    assert all(line.split('\t')[0] in ('pi', 'deino') for line in result.stdout.splitlines())
+    assert 'ok pi' in result.stderr.splitlines() and 'ok deino' in result.stderr.splitlines()
+    for machine in hosts.values():
+        assert (machine/'var/service-dir/demo-api/server/current/run').is_file()
+    # --to deploys a subset, so targets can run different versions.
+    release2 = root/'release-002'
+    shutil.copytree(release/'api', release2/'api')
+    (release2/'api/.toolkit-commit').write_text('b' * 40 + '\n')
+    deino_current = (hosts['deino']/'var/service-dir/demo-api/server/current').resolve()
+    result = run('remote', 'deploy', 'demo', 'api', str(release2/'api'), '--to', 'pi', extra=multi)
+    assert result.stderr.splitlines()[-1] == 'ok pi' and 'deino' not in result.stderr
+    assert (hosts['deino']/'var/service-dir/demo-api/server/current').resolve() == deino_current
+    releases = remote('releases', 'demo', extra=multi).splitlines()
+    assert f'pi\tapi\tselected\tcommit\t{"b" * 40}' in releases
+    assert f'deino\tapi\tselected\tcommit\t{commit}' in releases
+    # Unknown targets stop before any SSH.
+    calls = {name: (machine/'ssh-calls').read_bytes() for name, machine in hosts.items()}
+    remote('deploy', 'demo', 'api', str(release2/'api'), '--to', 'pi,missing', ok=False, extra=multi)
+    remote('deploy', 'demo', 'api', str(release2/'api'), '--to', 'pi,pi', ok=False, extra=multi)
+    assert calls == {name: (machine/'ssh-calls').read_bytes() for name, machine in hosts.items()}
+    # One failing target does not stop the other; the command still fails.
+    pi_current = (hosts['pi']/'var/service-dir/demo-api/server/current').resolve()
+    result = run('remote', 'deploy', 'demo', 'api', str(release2/'api'), ok=False, extra=dict(multi, FAIL_SSH_HOST='deino.example'))
+    assert 'ok pi' in result.stderr.splitlines() and 'failed deino' in result.stderr.splitlines()
+    assert (hosts['pi']/'var/service-dir/demo-api/server/current').resolve() != pi_current
+    assert (hosts['deino']/'var/service-dir/demo-api/server/current').resolve() == deino_current
+    assert not list((root/'state/remote').glob('.each.*'))
+    # rm needs --to with several targets.
+    remote('rm', 'demo', ok=False)
+    remote('rm', 'demo', '--to', 'pi,missing', ok=False)
+    assert len(remote('ls').splitlines()) == 2
+    remote('rm', 'demo', '--to', 'pi,deino')
+    assert not (root/'state/remote/connections/demo').exists()
+    # The old single-file layout reads as target default; the first write moves it.
+    old = root/'state/remote/connections/demo.json'
+    old.write_text(json.dumps({'host': 'pi.example', 'user': 'deployer', 'port': 22, 'identityFile': None}))
+    assert remote('ls') == 'demo\tdefault\tpi.example\tdeployer\t22'
+    status = remote('status', 'demo', extra=multi)
+    assert status and all(line.startswith('default\t') for line in status.splitlines())
+    remote('create', 'demo', 'deployer@deino.example', '--name', 'deino')
+    assert not old.exists()
+    assert json.loads(target.read_text())['host'] == 'pi.example'
+    assert json.loads((target.parent/'deino.json').read_text())['host'] == 'deino.example'
     print('remote: local validation, host setup/status, preservation, failures and concurrency passed')

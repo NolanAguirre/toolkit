@@ -1,8 +1,9 @@
 #!/bin/sh
 ##<help>
-## setup - Prepare a registered repository on its SSH host.
-## Usage: remote setup users|directories|supervision|all <repo>
-## Usage: remote setup service <repo> <service|--all>
+## setup - Prepare a registered repository on its SSH targets.
+## Usage: remote setup users|directories|supervision|all <repo> [--to target,...]
+## Usage: remote setup service <repo> <service|--all> [--to target,...]
+## Run on all targets (or the --to subset) in parallel; output lines are prefixed with the target name.
 ## services/<folder>/remote-services may declare multiple deployment services (name:PORT or name:-).
 ## Individual steps require their prerequisites; all runs them in order.
 ## Requires Linux or FreeBSD, root via sudo -n and s6 on the host.
@@ -16,10 +17,10 @@ step=$1
 shift
 case "$step" in
     users|directories|service|supervision)
-        remote_send "$step"
+        remote_each "$step"
         ;;
     all)
-        remote_send users directories service supervision
+        remote_each users directories service supervision
         ;;
     *)
         echo 'error: expected users, directories, service, supervision or all' >&2
