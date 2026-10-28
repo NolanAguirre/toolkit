@@ -50,6 +50,14 @@ command -v port >/dev/null 2>&1 || bootstrap_error 'port command is required'
 if [ -L "$root/services" ] || { [ -e "$root/services" ] && [ ! -d "$root/services" ]; }; then
     bootstrap_error 'services must be a real directory'
 fi
+path="$root/services/openresty"
+memcached="$root/services/memcached"
+if [ -e "$path" ] || [ -L "$path" ]; then
+    bootstrap_error "path already exists: $path"
+fi
+if [ -e "$memcached" ] || [ -L "$memcached" ]; then
+    bootstrap_error "path already exists: $memcached"
+fi
 nginx="$root/services/nginx"
 old="$root/services/nginx.old"
 if [ "$from_nginx" = 1 ]; then
@@ -69,14 +77,6 @@ else
     if [ -d "$nginx" ] && [ -n "$(ls -A -- "$nginx")" ]; then
         bootstrap_error "nginx is configured at $nginx; use --from-nginx to replace it"
     fi
-fi
-path="$root/services/openresty"
-memcached="$root/services/memcached"
-if [ -e "$path" ] || [ -L "$path" ]; then
-    bootstrap_error "path already exists: $path"
-fi
-if [ -e "$memcached" ] || [ -L "$memcached" ]; then
-    bootstrap_error "path already exists: $memcached"
 fi
 mkdir -p -- "$root/services"
 pending=$(mktemp -d "$root/services/.openresty.XXXXXX")
