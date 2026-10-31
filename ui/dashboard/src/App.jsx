@@ -384,7 +384,7 @@ export default function App() {
   const repo = repos.find(repo => repo.name === selected)
   const createForm = form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} serviceTypes={serviceTypes} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
-    <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">tk<span>toolkit</span></a><div className="header-actions"><span className="local">Local workspace</span><DevScope id="m6d2k8n" state={{ dark }}><button type="button" className="theme-toggle" aria-pressed={dark} onClick={toggleDark}>Dark mode</button></DevScope></div></header></DevScope>
+    <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">s6<span>s6craft</span></a><div className="header-actions"><span className="local">Local workspace</span><DevScope id="m6d2k8n" state={{ dark }}><button type="button" className="theme-toggle" aria-pressed={dark} onClick={toggleDark}>Dark mode</button></DevScope></div></header></DevScope>
     {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
     {error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
     <div className="workspace">
@@ -402,6 +402,6 @@ export default function App() {
         </> : <section className="panel empty">Select a repository to view its services, UIs, and deployments.</section>}
       </div></DevScope>
     </div>
-    <DevScope id="e3r7t1y"><footer>Toolkit dashboard <span>Powered by the toolkit CLI</span></footer></DevScope>
+    <DevScope id="e3r7t1y"><footer>s6craft dashboard <span>Powered by the s6craft CLI</span></footer></DevScope>
   </main></DevScope></DevTools>
 }
