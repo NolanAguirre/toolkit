@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for file in installed.rglob('*'):
         if file.is_file():
             file.chmod(0o755)
-    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), GSTATE_PATH=str(root/'global'), PORT_STATE_GROUP=str(os.getgid()), HOME=str(root/'home'),
                CODEX_HOME=str(root/'home/.codex'),
                USER='tester', ENV_USER='tester', TOOLKIT_HIST_LOCK='1',
                PATH=str(installed) + ':' + os.environ['PATH'])
@@ -55,13 +55,13 @@ with tempfile.TemporaryDirectory() as tmp:
     (shared/'db/CODEX.md').write_text('db codex\n')
     (shared/'.cursorignore').write_text('node_modules\n')
     (shared/'.cursorrules').write_text('shared cursor rules\n')
-    index = root/'state/ports/allocate/ports'
+    index = root/'global/ports/allocate/ports'
     existing = repo('existing', 9000)
     (existing/'ui').mkdir()
     call('port', 'allocate', 'create', 'existing')
     call('port', 'allocate', 'set', 'existing', '9000', '-m', 'custom description')
     before = index.read_bytes()
-    metadata = root/'state/ports/allocate/existing/9000'
+    metadata = root/'global/ports/allocate/existing/9000'
     metadata_before = metadata.read_bytes()
     assert call('bootstrap', 'repo', 'import', str(existing)) == str(existing)
     call('bootstrap', 'repo', 'import', str(existing))
@@ -174,16 +174,16 @@ with tempfile.TemporaryDirectory() as tmp:
     conflict = repo('conflict', 9000)
     call('bootstrap', 'repo', 'import', str(conflict), ok=False)
     assert not (root/'state/bootstrap/repos/conflict').exists()
-    assert not (root/'state/ports/allocate/conflict').exists()
+    assert not (root/'global/ports/allocate/conflict').exists()
     bad = repo('bad', 'not-a-port')
     call('bootstrap', 'repo', 'import', str(bad), ok=False)
-    assert not (root/'state/ports/allocate/bad').exists()
+    assert not (root/'global/ports/allocate/bad').exists()
     duplicate = repo('duplicate', 9600)
     extra = duplicate/'services/worker/env-dev/default'
     extra.mkdir(parents=True)
     (extra/'PORT').write_text('9600\n')
     call('bootstrap', 'repo', 'import', str(duplicate), ok=False)
-    assert not (root/'state/ports/allocate/duplicate').exists()
+    assert not (root/'global/ports/allocate/duplicate').exists()
     empty = root/'empty'
     empty.mkdir()
     call('bootstrap', 'repo', 'import', str(empty), ok=False)

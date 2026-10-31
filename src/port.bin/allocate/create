@@ -79,7 +79,7 @@ if printf '%s\n' "$ranges" | awk -v start="$start" -v end="$end" '
     NF == 2 && $1 <= end && $2 >= start { found=1 } END { exit !found }'; then
     port_error 'block overlaps an existing domain or allocated port'
 fi
-mkdir -m 700 "$PORT_ROOT/$domain"
+mkdir -m 2770 "$PORT_ROOT/$domain"
 atomic_write "$PORT_ROOT/$domain/.domain.json" jq -n --arg domain "$domain" \
     --argjson start "$start" --argjson end "$end" '{domain:$domain, start:$start, end:$end}'
 printf 'created domain %s: %s-%s (%s ports)\n' "$domain" "$start" "$end" "$((end - start + 1))"

@@ -6,7 +6,8 @@ export STATE_PATH GSTATE_PATH
 ##<help>
 ## setup - Initialize the bootstrap registry, current selection file and history.
 ## Usage: toolkit setup bootstrap
-## Store state under STATE_PATH/bootstrap; preserve existing registrations and selection.
+## Keep repository registrations and selection per user under STATE_PATH/bootstrap.
+## Port reservations are shared through the port tool under GSTATE_PATH/ports.
 ##</help>
 set -e
 . "$(dirname "$0")/../lib/locking.sh"

@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as tmp:
             file.chmod(0o755)
     repo = root/'sample'
     repo.mkdir()
-    env = dict(os.environ, STATE_PATH=str(root/'state'), USER='tester',
+    env = dict(os.environ, STATE_PATH=str(root/'state'), GSTATE_PATH=str(root/'global'), PORT_STATE_GROUP=str(os.getgid()), USER='tester',
                TOOLKIT_HIST_LOCK='1', PATH=str(src) + ':' + os.environ['PATH'])
 
     def call(tool, *args, ok=True, cwd=repo):
@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory() as tmp:
     call('bootstrap.bin/setup')
     call('port.bin/setup')
     call('port', 'allocate', 'create', 'sample')
-    index = root/'state/ports/allocate/ports'
+    index = root/'global/ports/allocate/ports'
     plain = repo/'ui/plain'
     assert call('bootstrap', 'ui', 'add', 'plain').stdout.strip() == str(plain)
     package = json.loads((plain/'package.json').read_text())

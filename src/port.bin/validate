@@ -5,8 +5,14 @@
 export STATE_PATH GSTATE_PATH
 set -e
 . "$(dirname "$0")/../lib/locking.sh"
-: "${STATE_PATH:?STATE_PATH is not set}"
-export STATE_DIR="$STATE_PATH/ports"
+# Command history belongs to the user's encryption key, not the shared registry.
+export HISTORY_DIR="$STATE_PATH/ports/history"
+case "$(basename "$1")" in
+    port-history)
+        exec "$@"
+        ;;
+esac
+export STATE_DIR="$GSTATE_PATH/ports"
 if [ ! -f "$STATE_DIR/lock" ] || [ ! -f "$STATE_DIR/allocate/ports" ]; then
     echo "error: port is not initialized; run toolkit setup port" >&2
     exit 1
@@ -14,7 +20,12 @@ fi
 umask 077
 # The inherited descriptor holds the lock through exec. The kernel releases it
 # when the command exits, including on failure or termination; no stale lock.
+if [ ! -w "$STATE_DIR/lock" ] || [ ! -w "$STATE_DIR/allocate/ports" ]; then
+    echo "error: port state requires membership in its shared group; ask an administrator for access" >&2
+    exit 1
+fi
 file_lock "$STATE_DIR/lock"
+export ATOMIC_WRITE_MODE=660
 command -v jq >/dev/null || { echo "error: port requires jq" >&2; exit 1; }
 # Refuse corrupt or duplicate reservations rather than risk allocating twice.
 jq -se '

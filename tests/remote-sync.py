@@ -67,7 +67,7 @@ finally:
     (installed/'sftp').chmod(0o755)
     (installed/'sync').write_text('#!/bin/sh\n[ -z "${FAIL_SYNC:-}" ] || exit 1\nexec /usr/bin/sync "$@"\n')
     (installed/'sync').chmod(0o755)
-    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), GSTATE_PATH=str(root/'global'), PORT_STATE_GROUP=str(os.getgid()), HOME=str(root/'home'),
                TOOLKIT_HIST_LOCK='1', TEST_ROOT=str(root), TEST_HOST=str(host),
                SFTP_SERVER=server, REAL_SFTP=client,
                PATH=str(installed) + ':' + os.environ['PATH'])

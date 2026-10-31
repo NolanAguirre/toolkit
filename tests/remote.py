@@ -194,7 +194,7 @@ env = dict(os.environ, MOCK_HOST=str(root), PATH=os.environ['MOCK_BIN'] + ':' + 
 sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returncode)
 ''')
     ssh.chmod(0o755)
-    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), GSTATE_PATH=str(root/'global'), PORT_STATE_GROUP=str(os.getgid()), HOME=str(root/'home'),
                USER='tester', ENV_USER='tester', TOOLKIT_HIST_LOCK='1',
                MOCK_HOST=str(host), MOCK_BIN=str(mocks),
                PATH=str(installed) + ':' + os.environ['PATH'])

@@ -6,6 +6,7 @@ export STATE_PATH GSTATE_PATH
 ##<help>
 ## setup - Initialize local remote target state.
 ## Usage: toolkit setup remote
+## Keep hosts, targets, connections and sync settings per user under STATE_PATH/remote.
 ## Preserve targets; this does not contact a host.
 ##</help>
 set -e

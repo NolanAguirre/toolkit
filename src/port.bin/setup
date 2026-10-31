@@ -1,20 +1,51 @@
 #!/bin/sh
 
-: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
-: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
-export STATE_PATH GSTATE_PATH
 ##<help>
-## setup - Initialize the port allocation journal and history.
+## setup - Initialize shared port allocations and personal command history.
 ## Usage: toolkit setup port
-## Store state under STATE_PATH/ports; preserve existing domains and reservations.
+## Store the registry and lock under GSTATE_PATH/ports; history under STATE_PATH/ports.
+## An administrator initializes shared state once, then each user runs setup normally.
+## PORT_STATE_GROUP defaults to s6craft-tools; create the group and add users first.
+## Preserve existing allocations. Existing personal allocations require manual migration.
 ##</help>
 set -e
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+: "${PORT_STATE_GROUP:=s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 . "$(dirname "$0")/../lib/locking.sh"
-: "${STATE_PATH:?STATE_PATH is not set}"
+
 umask 077
-STATE_DIR="$STATE_PATH/ports"
+mkdir -p "$STATE_PATH/ports/history"
+STATE_DIR="$GSTATE_PATH/ports"
+if [ -f "$STATE_DIR/lock" ] && [ -f "$STATE_DIR/allocate/ports" ]; then
+    file_lock "$STATE_DIR/lock"
+    echo "port initialized"
+    exit 0
+fi
+if [ -d "$STATE_PATH/ports/allocate" ]; then
+    echo "error: migrate existing personal port allocations to $STATE_DIR before setup" >&2
+    exit 1
+fi
+if ! getent group "$PORT_STATE_GROUP" >/dev/null; then
+    echo "error: create group $PORT_STATE_GROUP and add port users before setup, or set PORT_STATE_GROUP" >&2
+    exit 1
+fi
+
+# Only this registry is group-writable; installation settings remain administrator-owned.
+umask 022
+mkdir -p "$GSTATE_PATH"
+umask 077
 mkdir -p "$STATE_DIR"
+chgrp "$PORT_STATE_GROUP" "$STATE_DIR"
+chmod 2770 "$STATE_DIR"
 file_lock "$STATE_DIR/lock"
-mkdir -p "$STATE_DIR/history" "$STATE_DIR/allocate"
+chgrp "$PORT_STATE_GROUP" "$STATE_DIR/lock"
+chmod 660 "$STATE_DIR/lock"
+mkdir -p "$STATE_DIR/allocate"
+chgrp "$PORT_STATE_GROUP" "$STATE_DIR/allocate"
+chmod 2770 "$STATE_DIR/allocate"
 : >> "$STATE_DIR/allocate/ports"
+chgrp "$PORT_STATE_GROUP" "$STATE_DIR/allocate/ports"
+chmod 660 "$STATE_DIR/allocate/ports"
 echo "port initialized"

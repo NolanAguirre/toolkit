@@ -1,6 +1,7 @@
 #!/bin/sh
 # atomic_write <destination> <producer> [args...]
 # Publish producer stdout only on success. Caller must hold the relevant lock.
+# New files use ATOMIC_WRITE_MODE when supplied; otherwise they stay private.
 atomic_write() (
     [ "$#" -ge 2 ] || { echo "usage: atomic_write <destination> <producer> [args...]" >&2; exit 1; }
     _atomic_dest=$1
@@ -12,6 +13,8 @@ atomic_write() (
     "$@" > "$_atomic_tmp" || exit $?
     if [ -f "$_atomic_dest" ]; then
         chmod --reference="$_atomic_dest" "$_atomic_tmp" || exit 1
+    elif [ -n "${ATOMIC_WRITE_MODE:-}" ]; then
+        chmod "$ATOMIC_WRITE_MODE" "$_atomic_tmp" || exit 1
     fi
     sync -f "$_atomic_tmp" || exit 1
     mv -fT -- "$_atomic_tmp" "$_atomic_dest" || exit 1

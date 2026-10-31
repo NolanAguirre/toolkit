@@ -24,6 +24,12 @@ setup_one() {
         exit 1
     fi
 
+    # Port setup handles both shared allocations and private history under its lock.
+    if [ "$NAME" = port ]; then
+        "$SETUP"
+        return "$?"
+    fi
+
     STATE_NAME="$NAME"
     if [ -f "$TOOLKIT_BIN_PATH/$NAME.bin/state-name" ]; then
         STATE_NAME=$(cat "$TOOLKIT_BIN_PATH/$NAME.bin/state-name")

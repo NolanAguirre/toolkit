@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for file in installed.rglob('*'):
         if file.is_file():
             file.chmod(0o755)
-    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), GSTATE_PATH=str(root/'global'), PORT_STATE_GROUP=str(os.getgid()), HOME=str(root/'home'),
                USER='tester', ENV_USER='tester', TOOLKIT_HIST_LOCK='1',
                PATH=str(installed) + ':' + os.environ['PATH'])
 
@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory() as tmp:
     call('bootstrap.bin/setup')
     call('port.bin/setup')
     template = src/'bootstrap.bin/template'
-    index = root/'state/ports/allocate/ports'
+    index = root/'global/ports/allocate/ports'
 
     # Scaffolding and ports, accepting the empty nginx directory from repo create.
     project = repo('project', 6700)

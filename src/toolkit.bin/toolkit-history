@@ -8,7 +8,7 @@
 ## --clear removes this tool's history files without changing its other state.
 ##</help>
 
-HISTORY_DIR="$STATE_DIR/history"
+: "${HISTORY_DIR:=$STATE_DIR/history}"
 
 if [ ! -d "$HISTORY_DIR" ]; then
     echo "error: history directory not found at $HISTORY_DIR" >&2
