@@ -1,32 +1,38 @@
 #!/bin/sh
 
 ##<help>
-## setup - Record toolkit source and installation paths for initial setup.
-## Usage: sh src/toolkit.bin/setup
-## Require UTIL_PATH and TOOLKIT_SRC_PATH; TOOLKIT_BIN_PATH defaults to ~/.bin.
-## Write toolkit-path and bin-path under UTIL_PATH/toolkit and create history storage.
+## setup - Initialize personal state and shared installation settings.
+## Usage: sudo env TOOLKIT_SRC_PATH=/absolute/path/to/src sh src/toolkit.bin/setup
+## STATE_PATH defaults to $HOME/.s6craft-tools; GSTATE_PATH to /var/lib/s6craft-tools.
+## TOOLKIT_BIN_PATH defaults to /usr/local/bin. Existing settings are preserved.
+## Run toolkit build with permission to write the installation and global state.
+## Each user runs toolkit setup --all to initialize their personal tool state.
 ##</help>
 
 set -e
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 
-if [ -z "$UTIL_PATH" ]; then
-    echo "error: UTIL_PATH is not set"
-    exit 1
+: "${TOOLKIT_SRC_PATH:?TOOLKIT_SRC_PATH is not set}"
+. "$(dirname "$0")/../lib/locking.sh"
+. "$(dirname "$0")/../lib/files.sh"
+
+GLOBAL_STATE_DIR="$GSTATE_PATH/toolkit"
+BIN_PATH="${TOOLKIT_BIN_PATH:-/usr/local/bin}"
+umask 022
+mkdir -p "$GLOBAL_STATE_DIR"
+file_lock "$GLOBAL_STATE_DIR/lock"
+if [ ! -f "$GLOBAL_STATE_DIR/bin-path" ]; then
+    atomic_write "$GLOBAL_STATE_DIR/bin-path" printf '%s\n' "$BIN_PATH"
+    chmod 644 "$GLOBAL_STATE_DIR/bin-path"
 fi
-
-if [ -z "$TOOLKIT_SRC_PATH" ]; then
-    echo "error: TOOLKIT_SRC_PATH is not set"
-    exit 1
+if [ ! -f "$GLOBAL_STATE_DIR/toolkit-path" ]; then
+    atomic_write "$GLOBAL_STATE_DIR/toolkit-path" printf '%s\n' "$TOOLKIT_SRC_PATH"
+    chmod 644 "$GLOBAL_STATE_DIR/toolkit-path"
 fi
+: >> "$GLOBAL_STATE_DIR/installed"
 
-TOOLKIT_STATE_DIR="$UTIL_PATH/toolkit"
-BIN_PATH="${TOOLKIT_BIN_PATH:-$HOME/.bin}"
-
-mkdir -p "$TOOLKIT_STATE_DIR"
-mkdir -p "$TOOLKIT_STATE_DIR/history"
-mkdir -p "$TOOLKIT_STATE_DIR/tests"
-
-echo "$BIN_PATH" > "$TOOLKIT_STATE_DIR/bin-path"
-echo "$TOOLKIT_SRC_PATH" > "$TOOLKIT_STATE_DIR/toolkit-path"
-
+umask 077
+mkdir -p "$STATE_PATH/toolkit/history" "$STATE_PATH/toolkit/tests"
 echo "toolkit setup complete"

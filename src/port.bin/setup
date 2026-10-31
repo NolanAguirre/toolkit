@@ -1,14 +1,18 @@
 #!/bin/sh
+
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 ##<help>
 ## setup - Initialize the port allocation journal and history.
 ## Usage: toolkit setup port
-## Store state under UTIL_PATH/ports; preserve existing domains and reservations.
+## Store state under STATE_PATH/ports; preserve existing domains and reservations.
 ##</help>
 set -e
 . "$(dirname "$0")/../lib/locking.sh"
-: "${UTIL_PATH:?UTIL_PATH is not set}"
+: "${STATE_PATH:?STATE_PATH is not set}"
 umask 077
-STATE_DIR="$UTIL_PATH/ports"
+STATE_DIR="$STATE_PATH/ports"
 mkdir -p "$STATE_DIR"
 file_lock "$STATE_DIR/lock"
 mkdir -p "$STATE_DIR/history" "$STATE_DIR/allocate"

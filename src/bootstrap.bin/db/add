@@ -9,7 +9,7 @@
 ## Deploy changes must be transactional and idempotent; revert/verify stay empty.
 ## PostgreSQL uses postgres@localhost:5432; SQLite uses db/<name>/<name>.sqlite.
 ## Register engine and database_url or repo-relative db_file beneath
-## UTIL_PATH/bootstrap/repos/<repo>/databases/<name>; never store passwords.
+## STATE_PATH/bootstrap/repos/<repo>/databases/<name>; never store passwords.
 ## Registry values generate Sqitch config and new service environments; edits to outputs are not imported.
 ## Add explicit db.<name>.<target> forwarding and help to the root Makefile.
 ## Run from a registered repository root (bootstrap repo load .). No database tools needed.

@@ -1,8 +1,12 @@
 #!/bin/sh
+
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 set -e
 . "$(dirname "$0")/../lib/locking.sh"
-: "${UTIL_PATH:?UTIL_PATH is not set}"
-export STATE_DIR="$UTIL_PATH/desktop"
+: "${STATE_PATH:?STATE_PATH is not set}"
+export STATE_DIR="$STATE_PATH/desktop"
 [ -f "$STATE_DIR/lock" ] && [ -d "$STATE_DIR/workspaces" ] || {
     echo 'error: desktop is not initialized; run toolkit setup desktop' >&2
     exit 1

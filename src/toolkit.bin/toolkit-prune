@@ -3,9 +3,10 @@
 ##<help>
 ## prune - Remove installed files absent from source; -n previews removals.
 ## Usage: toolkit prune [-n]
-## Compare the configured bin directory with source, including nested directories.
+## Compare toolkit-owned paths with source, including nested directories.
+## Leave unrelated entries in the shared bin directory alone.
 ## Without -n, delete installed entries with no matching source path.
-## Source files and state under UTIL_PATH are unchanged.
+## Source files and state under STATE_PATH are unchanged.
 ##</help>
 
 set -e
@@ -41,7 +42,37 @@ prune_dir() (
     done
 )
 
-output=$(prune_dir "$TOOLKIT_SRC_PATH" "$TOOLKIT_BIN_PATH" "")
+manifest="$GLOBAL_STATE_DIR/installed"
+if [ ! -f "$manifest" ]; then
+    echo "error: installation manifest not found; run toolkit build first" >&2
+    exit 1
+fi
+
+output=$(
+    while IFS= read -r name; do
+        case "$name" in
+            ''|.|..|*/*)
+                echo "error: invalid installation manifest entry" >&2
+                exit 1
+                ;;
+        esac
+        source="$TOOLKIT_SRC_PATH/$name"
+        destination="$TOOLKIT_BIN_PATH/$name"
+        if [ ! -e "$destination" ] && [ ! -L "$destination" ]; then
+            continue
+        fi
+        if [ ! -e "$source" ] && [ ! -L "$source" ]; then
+            if [ "$dry_run" = true ]; then
+                echo "would remove: $name"
+            else
+                rm -rf -- "$destination"
+                echo "removed: $name"
+            fi
+        elif [ -d "$source" ] && [ ! -L "$source" ] && [ -d "$destination" ] && [ ! -L "$destination" ]; then
+            prune_dir "$source" "$destination" "$name/"
+        fi
+    done < "$manifest"
+)
 
 if [ -z "$output" ]; then
     echo "nothing to prune"

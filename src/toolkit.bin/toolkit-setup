@@ -11,6 +11,12 @@ set -e
 
 setup_one() {
     NAME="$1"
+    if [ "$NAME" = toolkit ]; then
+        umask 077
+        mkdir -p "$STATE_PATH/toolkit/history" "$STATE_PATH/toolkit/tests"
+        echo "toolkit initialized"
+        return 0
+    fi
     SETUP="$TOOLKIT_BIN_PATH/$NAME.bin/setup"
 
     if [ ! -f "$SETUP" ]; then
@@ -30,7 +36,7 @@ setup_one() {
             ;;
     esac
 
-    TARGET_STATE="$UTIL_PATH/$STATE_NAME"
+    TARGET_STATE="$STATE_PATH/$STATE_NAME"
 
     if [ ! -d "$TARGET_STATE" ]; then
         "$SETUP"
@@ -41,7 +47,7 @@ setup_one() {
     PATCH_LOG="$(mktemp)"
     trap "rm -rf '$SANDBOX' '$PATCH_LOG'" 0
 
-    UTIL_PATH="$SANDBOX" "$SETUP" > /dev/null
+    STATE_PATH="$SANDBOX" GSTATE_PATH="$SANDBOX/global" "$SETUP" > /dev/null
 
     SANDBOX_STATE="$SANDBOX/$STATE_NAME"
     if [ ! -d "$SANDBOX_STATE" ]; then

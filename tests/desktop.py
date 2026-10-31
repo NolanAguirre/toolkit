@@ -11,7 +11,7 @@ import time
 src = Path(__file__).resolve().parents[1] / 'src'
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
-    env = dict(os.environ, UTIL_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
                XDG_CONFIG_HOME=str(root/'config'), TOOLKIT_HIST_LOCK='1')
     (root/'home').mkdir()
     repo = root/"repo with 'quotes' and spaces"

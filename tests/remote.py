@@ -194,7 +194,7 @@ env = dict(os.environ, MOCK_HOST=str(root), PATH=os.environ['MOCK_BIN'] + ':' + 
 sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returncode)
 ''')
     ssh.chmod(0o755)
-    env = dict(os.environ, UTIL_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
                USER='tester', ENV_USER='tester', TOOLKIT_HIST_LOCK='1',
                MOCK_HOST=str(host), MOCK_BIN=str(mocks),
                PATH=str(installed) + ':' + os.environ['PATH'])
@@ -231,7 +231,7 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     key.write_text('fixture key path only')
     # Dispatcher history runs before validation; target input must never be logged.
     (installed/'encrypt').unlink()
-    (installed/'encrypt').write_text('#!/bin/sh\ntouch "$UTIL_PATH/history-called"\ncat\n')
+    (installed/'encrypt').write_text('#!/bin/sh\ntouch "$STATE_PATH/history-called"\ncat\n')
     (installed/'encrypt').chmod(0o755)
     remote('create', 'demo', 'user:password@host', ok=False, extra={'TOOLKIT_HIST_LOCK': ''})
     remote('create', 'demo', '192.0.2.10', '--user', 'deployer', '--port', '2222', '--identity-file', str(key), extra={'TOOLKIT_HIST_LOCK': ''})
@@ -403,7 +403,7 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     state2 = root/'state2'
     shutil.copytree(root/'state', state2)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(remote, 'setup', 'all', 'demo', extra={'UTIL_PATH': str(state)})
+        futures = [pool.submit(remote, 'setup', 'all', 'demo', extra={'STATE_PATH': str(state)})
                    for state in (root/'state', state2)]
         for future in futures:
             future.result()
@@ -528,7 +528,7 @@ sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returnco
     # Clients serialize through the host's s6-setlock, preserving all successful releases.
     def publish(state):
         return subprocess.run([str(installed/'remote'), 'deploy', 'demo', 'api', str(release/'api')],
-                              env=dict(env, UTIL_PATH=str(state)), capture_output=True, timeout=30).returncode
+                              env=dict(env, STATE_PATH=str(state)), capture_output=True, timeout=30).returncode
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         assert list(pool.map(publish, [root/'state', state2])) == [0, 0]
     assert len(list((api/'server').glob('server-*'))) == 4

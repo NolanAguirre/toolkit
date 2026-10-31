@@ -1,10 +1,14 @@
 #!/bin/sh
+
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 set -e
 REMOTE_BIN=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 . "$REMOTE_BIN/../lib/locking.sh"
 . "$REMOTE_BIN/../lib/remote.sh"
-: "${UTIL_PATH:?UTIL_PATH is not set}"
-REMOTE_STATE="$UTIL_PATH/remote"
+: "${STATE_PATH:?STATE_PATH is not set}"
+REMOTE_STATE="$STATE_PATH/remote"
 [ -f "$REMOTE_STATE/lock" ] && [ -d "$REMOTE_STATE/targets" ] || remote_error 'run toolkit setup remote first'
 umask 077
 file_lock "$REMOTE_STATE/lock"
@@ -193,10 +197,10 @@ if [ "$action" = remote-rm ]; then
     export REMOTE_TO
     exec "$command" "$@"
 fi
-[ -f "$UTIL_PATH/bootstrap/lock" ] || remote_error 'run toolkit setup bootstrap first'
-exec 8>>"$UTIL_PATH/bootstrap/lock"
+[ -f "$STATE_PATH/bootstrap/lock" ] || remote_error 'run toolkit setup bootstrap first'
+exec 8>>"$STATE_PATH/bootstrap/lock"
 flock -x 8
-registration="$UTIL_PATH/bootstrap/repos/$REMOTE_REPO/path"
+registration="$STATE_PATH/bootstrap/repos/$REMOTE_REPO/path"
 [ -f "$registration" ] || remote_error 'repo is not registered; use bootstrap repo load or import'
 root=$(cat "$registration")
 [ -d "$root/services" ] && [ ! -L "$root/services" ] || remote_error 'registered repo needs a real services directory'

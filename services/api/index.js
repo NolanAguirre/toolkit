@@ -124,7 +124,7 @@ async function regularFile(directory, relative) {
 }
 
 async function databaseEngine(repo, name) {
-  const state = process.env.UTIL_PATH
+  const state = process.env.STATE_PATH || path.join(process.env.HOME || require('node:os').homedir(), '.s6craft-tools')
   if (!state || !repoName.test(repo.name) || !/^[a-z][a-z0-9_]{0,62}$/.test(name)) return null
   let registry
   try {

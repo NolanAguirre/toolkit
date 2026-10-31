@@ -15,7 +15,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
   let server
   t.after(async () => {
     if (server) await new Promise(resolve => server.close(resolve))
-    for (const key of ['UTIL_PATH', 'TOOLKIT_HIST_LOCK', 'PATH', 'HOME', 'CODEX_HOME', 'USER', 'ENV_USER']) {
+    for (const key of ['STATE_PATH', 'TOOLKIT_HIST_LOCK', 'PATH', 'HOME', 'CODEX_HOME', 'USER', 'ENV_USER']) {
       if (original[key] === undefined) delete process.env[key]
       else process.env[key] = original[key]
     }
@@ -26,7 +26,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
   for (const entry of readdirSync(installed, { recursive: true, withFileTypes: true })) {
     if (entry.isFile()) chmodSync(path.join(entry.parentPath, entry.name), 0o755)
   }
-  Object.assign(process.env, { UTIL_PATH: path.join(directory, 'state'), TOOLKIT_HIST_LOCK: '1', PATH: `${installed}:${original.PATH}`, HOME: path.join(directory, 'home'), CODEX_HOME: path.join(directory, 'home/.codex'), USER: 'tester', ENV_USER: 'tester' })
+  Object.assign(process.env, { STATE_PATH: path.join(directory, 'state'), TOOLKIT_HIST_LOCK: '1', PATH: `${installed}:${original.PATH}`, HOME: path.join(directory, 'home'), CODEX_HOME: path.join(directory, 'home/.codex'), USER: 'tester', ENV_USER: 'tester' })
   const rules = path.join(process.env.HOME, '.s6craft')
   mkdirSync(path.join(rules, '.cursor/rules'), { recursive: true })
   mkdirSync(path.join(rules, '.claude/rules'), { recursive: true })
@@ -62,7 +62,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     mkdirSync(path.join(directory, 'conflict/services/api/env-dir/default'), { recursive: true })
     writeFileSync(path.join(directory, 'conflict/services/api/env-dir/default/PORT'), '19001\n')
     assert.equal((await post('/api/repos/import', { path: path.join(directory, 'conflict') })).status, 409)
-    assert.equal(existsSync(path.join(process.env.UTIL_PATH, 'bootstrap/repos/conflict')), false)
+    assert.equal(existsSync(path.join(process.env.STATE_PATH, 'bootstrap/repos/conflict')), false)
     assert.equal((await (await get('/api/repos')).json()).repos.find(repo => repo.current).name, 'imported')
   })
 
@@ -121,7 +121,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
       post('/api/repos/example/services', { name: 'worker', support: ['http'] }),
     ])
     assert.deepEqual(responses.map(response => response.status).sort(), [201, 409])
-    const records = readFileSync(path.join(process.env.UTIL_PATH, 'ports/allocate/ports'), 'utf8').trim().split('\n').map(JSON.parse)
+    const records = readFileSync(path.join(process.env.STATE_PATH, 'ports/allocate/ports'), 'utf8').trim().split('\n').map(JSON.parse)
     assert.equal(records.filter(record => record.domain === 'example' && record.name === 'services/worker').length, 1)
     assert.equal(readdirSync(path.join(repoPath, 'services')).some(name => name.startsWith('.service.')), false)
   })
@@ -161,8 +161,8 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
   })
 
   await t.test('saves direct hosts and SSH connection strings as JSON without contacting hosts', async () => {
-    writeFileSync(path.join(installed, 'ssh'), '#!/bin/sh\ntouch "$UTIL_PATH/unexpected-ssh"\nexit 1\n', { mode: 0o755 })
-    const config = path.join(process.env.UTIL_PATH, 'remote/connections/example.json')
+    writeFileSync(path.join(installed, 'ssh'), '#!/bin/sh\ntouch "$STATE_PATH/unexpected-ssh"\nexit 1\n', { mode: 0o755 })
+    const config = path.join(process.env.STATE_PATH, 'remote/connections/example.json')
     let response = await post('/api/repos/example/target', { host: '192.0.2.20', user: 'deployer' })
     assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
     assert.deepEqual((await response.json()).target, { host: '192.0.2.20', user: 'deployer', port: 22, identityFile: null, legacy: false })
@@ -187,7 +187,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     const inventory = await (await get('/api/repos/example/deployments')).json()
     assert.equal(inventory.remoteTarget, 'test-host')
     assert.deepEqual(inventory.remoteConnection, { host: 'test-host', user: 'deployer', port: 22, identityFile: null, legacy: false })
-    assert.equal(existsSync(path.join(process.env.UTIL_PATH, 'unexpected-ssh')), false)
+    assert.equal(existsSync(path.join(process.env.STATE_PATH, 'unexpected-ssh')), false)
   })
 
   await t.test('deploys bundles and individual services through the real remote command', async () => {
@@ -196,17 +196,17 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
       mkdirSync(path.join(releasePath, service), { recursive: true })
       writeFileSync(path.join(releasePath, service, 'run'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     }
-    writeFileSync(path.join(process.env.UTIL_PATH, 'remote/targets/example'), 'test-host\n')
+    writeFileSync(path.join(process.env.STATE_PATH, 'remote/targets/example'), 'test-host\n')
     const ssh = path.join(installed, 'ssh')
-    const capture = path.join(process.env.UTIL_PATH, 'ssh-payload')
-    const sshSuccess = '#!/bin/sh\nprintf "%s\\n" "$@" > "$UTIL_PATH/ssh-args"\ncat > "$UTIL_PATH/ssh-payload"\nprintf "deployed\\n"\n'
+    const capture = path.join(process.env.STATE_PATH, 'ssh-payload')
+    const sshSuccess = '#!/bin/sh\nprintf "%s\\n" "$@" > "$STATE_PATH/ssh-args"\ncat > "$STATE_PATH/ssh-payload"\nprintf "deployed\\n"\n'
     writeFileSync(ssh, sshSuccess, { mode: 0o755 })
     // Global selection must not choose the deployment destination.
     await post('/api/repos/imported/select', {})
     const deployed = await post('/api/repos/example/deployments', { releasePath })
     assert.equal(deployed.status, 200, JSON.stringify(await deployed.clone().json()))
     assert.deepEqual(await deployed.json(), { releasePath, service: null, output: 'deployed' })
-    assert.match(readFileSync(path.join(process.env.UTIL_PATH, 'ssh-args'), 'utf8'), /StrictHostKeyChecking=yes\n-o\nConnectTimeout=10\n-F\n\/dev\/null\n-l\ndeployer\n-p\n22\ntest-host\nsudo -n sh -s/)
+    assert.match(readFileSync(path.join(process.env.STATE_PATH, 'ssh-args'), 'utf8'), /StrictHostKeyChecking=yes\n-o\nConnectTimeout=10\n-F\n\/dev\/null\n-l\ndeployer\n-p\n22\ntest-host\nsudo -n sh -s/)
     const payload = readFileSync(capture, 'utf8')
     assert.match(payload, /repo='example'/)
     const archive = path.join(directory, 'bundle.tar.gz')
@@ -245,9 +245,9 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
 
     // Hold SSH after remote has acquired the bootstrap lock. A second POST must
     // reject immediately instead of waiting on repo ls and deploying again later.
-    const entered = path.join(process.env.UTIL_PATH, 'ssh-entered')
-    const release = path.join(process.env.UTIL_PATH, 'ssh-release')
-    writeFileSync(ssh, '#!/bin/sh\ncat > /dev/null\ntouch "$UTIL_PATH/ssh-entered"\nwhile [ ! -f "$UTIL_PATH/ssh-release" ]; do sleep 0.05; done\necho deployed\n')
+    const entered = path.join(process.env.STATE_PATH, 'ssh-entered')
+    const release = path.join(process.env.STATE_PATH, 'ssh-release')
+    writeFileSync(ssh, '#!/bin/sh\ncat > /dev/null\ntouch "$STATE_PATH/ssh-entered"\nwhile [ ! -f "$STATE_PATH/ssh-release" ]; do sleep 0.05; done\necho deployed\n')
     const pending = post('/api/repos/example/deployments', { releasePath })
     try {
       for (let attempt = 0; attempt < 100 && !existsSync(entered); attempt++) await new Promise(resolve => setTimeout(resolve, 50))
@@ -268,7 +268,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     mkdirSync(path.join(repoPath, '.release/20261012T010000Z'), { recursive: true })
     mkdirSync(path.join(repoPath, 'deployment'))
     writeFileSync(path.join(repoPath, 'deployment/Makefile'), 'status:\n\ttouch should-never-run\n')
-    writeFileSync(path.join(process.env.UTIL_PATH, 'remote/targets/example'), 'test-host\n')
+    writeFileSync(path.join(process.env.STATE_PATH, 'remote/targets/example'), 'test-host\n')
     // Exercise the real remote dispatcher/validation with a non-network SSH fixture.
     const ssh = path.join(installed, 'ssh')
     writeFileSync(ssh, '#!/bin/sh\nprintf "api\\truntime\\tstate\\tup\\napi\\truntime\\tpid\\t123\\napi\\truntime\\tidentity\\tverified\\napi\\trunning\\tcommit\\t' + 'a'.repeat(40) + '\\napi\\trunning\\tarchive_sha256\\t' + 'b'.repeat(64) + '\\napi\\tselected\\trelease\\tserver-new\\n"\n')
@@ -301,7 +301,7 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     symlinkSync(external, path.join(directory, 'imported/ui'))
     assert.equal((await post('/api/repos/imported/uis', { name: 'escape' })).status, 422)
     assert.equal(existsSync(path.join(external, 'escape')), false)
-    rmSync(path.join(process.env.UTIL_PATH, 'remote/lock'))
+    rmSync(path.join(process.env.STATE_PATH, 'remote/lock'))
     assert.match((await (await get('/api/repos/example/deployments')).json()).remoteError, /setup remote/)
   })
 })

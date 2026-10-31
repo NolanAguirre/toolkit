@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as tmp:
             file.chmod(0o755)
     repo = root/'sample'
     repo.mkdir()
-    env = dict(os.environ, UTIL_PATH=str(root/'state'), USER='tester',
+    env = dict(os.environ, STATE_PATH=str(root/'state'), USER='tester',
                TOOLKIT_HIST_LOCK='1', PATH=str(src) + ':' + os.environ['PATH'])
 
     def call(tool, *args, ok=True, cwd=repo):

@@ -67,7 +67,7 @@ finally:
     (installed/'sftp').chmod(0o755)
     (installed/'sync').write_text('#!/bin/sh\n[ -z "${FAIL_SYNC:-}" ] || exit 1\nexec /usr/bin/sync "$@"\n')
     (installed/'sync').chmod(0o755)
-    env = dict(os.environ, UTIL_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
                TOOLKIT_HIST_LOCK='1', TEST_ROOT=str(root), TEST_HOST=str(host),
                SFTP_SERVER=server, REAL_SFTP=client,
                PATH=str(installed) + ':' + os.environ['PATH'])
@@ -140,9 +140,9 @@ finally:
 
     # A second machine can register the same profile with independent state.
     second = root/'second-state'
-    subprocess.run([str(installed/'remote.bin/setup')], env=dict(env, UTIL_PATH=str(second)), check=True, capture_output=True)
-    sync('create', 'game', 'windows-unity', 'C:/Projects/My Game', extra={'UTIL_PATH': str(second)})
-    sync('pull', 'game', str(fresh), extra={'UTIL_PATH': str(second)})
+    subprocess.run([str(installed/'remote.bin/setup')], env=dict(env, STATE_PATH=str(second)), check=True, capture_output=True)
+    sync('create', 'game', 'windows-unity', 'C:/Projects/My Game', extra={'STATE_PATH': str(second)})
+    sync('pull', 'game', str(fresh), extra={'STATE_PATH': str(second)})
 
     calls = (root/'calls').read_bytes()
     (local/'Assets/link').symlink_to(root)

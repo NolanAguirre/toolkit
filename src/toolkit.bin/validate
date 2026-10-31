@@ -1,31 +1,28 @@
 #!/bin/sh
+set -e
 
-if [ -z "$UTIL_PATH" ]; then
-    echo "error: UTIL_PATH is not set"
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
+
+. "$(dirname "$0")/../lib/locking.sh"
+STATE_DIR="$STATE_PATH/toolkit"
+GLOBAL_STATE_DIR="$GSTATE_PATH/toolkit"
+
+if [ ! -f "$GLOBAL_STATE_DIR/bin-path" ] || [ ! -f "$GLOBAL_STATE_DIR/toolkit-path" ]; then
+    echo "error: toolkit is not initialized; run sh src/toolkit.bin/setup first" >&2
     exit 1
 fi
 
-STATE_DIR="$UTIL_PATH/toolkit"
+TOOLKIT_BIN_PATH=$(cat "$GLOBAL_STATE_DIR/bin-path")
+TOOLKIT_SRC_PATH=$(cat "$GLOBAL_STATE_DIR/toolkit-path")
+TOOLKIT_TOOLKIT_PATH="$TOOLKIT_SRC_PATH"
 
-if [ ! -d "$STATE_DIR" ]; then
-    echo "error: toolkit is not initialized, run toolkit setup first" >&2
-    exit 1
-fi
+case "$(basename "$1")" in
+    toolkit-build|toolkit-prune)
+        file_lock "$GLOBAL_STATE_DIR/lock"
+        ;;
+esac
 
-if [ ! -f "$STATE_DIR/bin-path" ]; then
-    echo "error: bin-path not found, run toolkit setup first" >&2
-    exit 1
-fi
-
-if [ ! -f "$STATE_DIR/toolkit-path" ]; then
-    echo "error: toolkit-path not found, run toolkit setup first" >&2
-    exit 1
-fi
-
-TOOLKIT_BIN_PATH=$(cat "$STATE_DIR/bin-path")
-TOOLKIT_TOOLKIT_PATH=$(cat "$STATE_DIR/toolkit-path")
-TOOLKIT_SRC_PATH="$TOOLKIT_TOOLKIT_PATH"
-
-export STATE_DIR TOOLKIT_BIN_PATH TOOLKIT_TOOLKIT_PATH TOOLKIT_SRC_PATH
-
+export STATE_DIR GLOBAL_STATE_DIR TOOLKIT_BIN_PATH TOOLKIT_TOOLKIT_PATH TOOLKIT_SRC_PATH
 exec "$@"

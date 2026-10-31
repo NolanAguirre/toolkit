@@ -1,14 +1,18 @@
 #!/bin/sh
+
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 ##<help>
 ## setup - Initialize the bootstrap registry, current selection file and history.
 ## Usage: toolkit setup bootstrap
-## Store state under UTIL_PATH/bootstrap; preserve existing registrations and selection.
+## Store state under STATE_PATH/bootstrap; preserve existing registrations and selection.
 ##</help>
 set -e
 . "$(dirname "$0")/../lib/locking.sh"
-: "${UTIL_PATH:?UTIL_PATH is not set}"
+: "${STATE_PATH:?STATE_PATH is not set}"
 umask 077
-STATE_DIR="$UTIL_PATH/bootstrap"
+STATE_DIR="$STATE_PATH/bootstrap"
 mkdir -p "$STATE_DIR"
 file_lock "$STATE_DIR/lock"
 mkdir -p "$STATE_DIR/repos" "$STATE_DIR/history"

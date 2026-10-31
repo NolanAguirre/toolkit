@@ -17,7 +17,7 @@
 ## Write its conventional block port to env-dir/default/PORT and the selected user's PORT.
 ## Write HOST=localhost alongside PORT. ENV_USER selects the user, falling back to USER.
 ## The default nginx identity is the repository UI/API proxy; extra routing proxies are separate services.
-## Use the repo name as its port domain and record it under UTIL_PATH/bootstrap/repos.
+## Use the repo name as its port domain and record it under STATE_PATH/bootstrap/repos.
 ## If scaffolding fails, partial code and reservations remain available for recovery.
 ##</help>
 set -e

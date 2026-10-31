@@ -1,16 +1,20 @@
 #!/bin/sh
+
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 ##<help>
 ## setup - Initialize the age identity, public recipient and encryption history.
 ## Usage: toolkit setup encrypt
-## Require age and age-keygen. Keep existing keys under UTIL_PATH/encrypt.
+## Require age and age-keygen. Keep existing keys under STATE_PATH/encrypt.
 ## New private keys have no password; use encrypt password set to protect one.
 ##</help>
 set -e
-: "${UTIL_PATH:?UTIL_PATH is not set}"
+: "${STATE_PATH:?STATE_PATH is not set}"
 command -v age >/dev/null
 command -v age-keygen >/dev/null
 umask 077
-STATE_DIR="$UTIL_PATH/encrypt"
+STATE_DIR="$STATE_PATH/encrypt"
 mkdir -p "$STATE_DIR/history"
 chmod 700 "$STATE_DIR" "$STATE_DIR/history"
 if [ ! -e "$STATE_DIR/identity" ]; then

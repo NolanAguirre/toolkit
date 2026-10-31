@@ -32,18 +32,13 @@ cat > "$BIN_DIR/setup" <<EOF
 
 set -e
 
-if [ -z "\$UTIL_PATH" ]; then
-    echo "error: UTIL_PATH is not set"
-    exit 1
-fi
+: "\${STATE_PATH:=\${HOME:?HOME is not set}/.s6craft-tools}"
+: "\${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 
-STATE="\$UTIL_PATH/$NAME"
+STATE="\$STATE_PATH/$NAME"
 
-if [ -d "\$STATE" ]; then
-    echo "error: $NAME already exists"
-    exit 1
-fi
-
+umask 077
 mkdir -p "\$STATE"
 mkdir -p "\$STATE/history"
 echo "initialized $NAME"
@@ -56,12 +51,11 @@ cat > "$BIN_DIR/validate" <<EOF
 
 set -e
 
-if [ -z "\$UTIL_PATH" ]; then
-    echo "error: UTIL_PATH is not set"
-    exit 1
-fi
+: "\${STATE_PATH:=\${HOME:?HOME is not set}/.s6craft-tools}"
+: "\${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 
-STATE_DIR="\$UTIL_PATH/$NAME"
+STATE_DIR="\$STATE_PATH/$NAME"
 
 if [ ! -d "\$STATE_DIR" ]; then
     echo "error: $NAME not initialized, run toolkit setup first"

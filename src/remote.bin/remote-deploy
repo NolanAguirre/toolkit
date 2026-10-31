@@ -24,7 +24,7 @@ fi
 upload=$(mktemp -d "$REMOTE_STATE/.deploy.XXXXXX")
 trap 'rm -rf -- "$upload"' 0
 trap 'exit 1' HUP INT TERM
-repo_path=$(cat "$UTIL_PATH/bootstrap/repos/$REMOTE_REPO/path")
+repo_path=$(cat "$STATE_PATH/bootstrap/repos/$REMOTE_REPO/path")
 checkout_commit=unknown
 checkout_dirty=unknown
 if command -v git >/dev/null 2>&1 && checkout_commit=$(git -C "$repo_path" rev-parse --verify HEAD 2>/dev/null); then

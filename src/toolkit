@@ -1,11 +1,15 @@
 #!/bin/sh
 
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
+
 TOOLKIT="$(basename "$0")"
 BIN_DIR="$(dirname "$0")/$TOOLKIT.bin"
 ORG_ARGS="$*"
 
 record_history() (
-    if [ -n "$TOOLKIT_HIST_LOCK" ] || [ -z "$UTIL_PATH" ]; then
+    if [ -n "$TOOLKIT_HIST_LOCK" ] || [ -z "$STATE_PATH" ]; then
         return 0
     fi
 
@@ -20,7 +24,7 @@ record_history() (
             ;;
     esac
 
-    history_dir="$UTIL_PATH/$state_name/history"
+    history_dir="$STATE_PATH/$state_name/history"
     if [ ! -d "$history_dir" ]; then
         return 0
     fi

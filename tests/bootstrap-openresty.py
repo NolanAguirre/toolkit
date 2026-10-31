@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for file in installed.rglob('*'):
         if file.is_file():
             file.chmod(0o755)
-    env = dict(os.environ, UTIL_PATH=str(root/'state'), HOME=str(root/'home'),
+    env = dict(os.environ, STATE_PATH=str(root/'state'), HOME=str(root/'home'),
                USER='tester', ENV_USER='tester', TOOLKIT_HIST_LOCK='1',
                PATH=str(installed) + ':' + os.environ['PATH'])
 

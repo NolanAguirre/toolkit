@@ -1,13 +1,17 @@
 #!/bin/sh
+
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 ##<help>
 ## setup - Initialize desktop workspace configuration without replacing existing entries.
 ## Usage: toolkit setup desktop
 ##</help>
 set -e
 . "$(dirname "$0")/../lib/locking.sh"
-: "${UTIL_PATH:?UTIL_PATH is not set}"
+: "${STATE_PATH:?STATE_PATH is not set}"
 umask 077
-mkdir -p "$UTIL_PATH/desktop"
-file_lock "$UTIL_PATH/desktop/lock"
-mkdir -p "$UTIL_PATH/desktop/workspaces" "$UTIL_PATH/desktop/history"
+mkdir -p "$STATE_PATH/desktop"
+file_lock "$STATE_PATH/desktop/lock"
+mkdir -p "$STATE_PATH/desktop/workspaces" "$STATE_PATH/desktop/history"
 echo 'desktop initialized'

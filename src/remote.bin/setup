@@ -1,4 +1,8 @@
 #!/bin/sh
+
+: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+export STATE_PATH GSTATE_PATH
 ##<help>
 ## setup - Initialize local remote target state.
 ## Usage: toolkit setup remote
@@ -6,12 +10,12 @@
 ##</help>
 set -e
 . "$(dirname "$0")/../lib/locking.sh"
-: "${UTIL_PATH:?UTIL_PATH is not set}"
+: "${STATE_PATH:?STATE_PATH is not set}"
 umask 077
-mkdir -p "$UTIL_PATH/remote"
-file_lock "$UTIL_PATH/remote/lock"
-mkdir -p "$UTIL_PATH/remote/targets" "$UTIL_PATH/remote/history"
-mkdir -p "$UTIL_PATH/remote/connections"
-mkdir -p "$UTIL_PATH/remote/hosts"
-mkdir -p "$UTIL_PATH/remote/sync"
+mkdir -p "$STATE_PATH/remote"
+file_lock "$STATE_PATH/remote/lock"
+mkdir -p "$STATE_PATH/remote/targets" "$STATE_PATH/remote/history"
+mkdir -p "$STATE_PATH/remote/connections"
+mkdir -p "$STATE_PATH/remote/hosts"
+mkdir -p "$STATE_PATH/remote/sync"
 printf '%s\n' 'remote initialized'
