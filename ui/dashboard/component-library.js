@@ -10,7 +10,13 @@ const entry = [
   `export { default as DevInspector, DevScope } from ${JSON.stringify(`${source}/components/DevInspector/devInspector.jsx`)}`,
   `export { default as Badge } from ${JSON.stringify(`${source}/components/Badge/badge.jsx`)}`,
   `export { default as ScrollingText } from ${JSON.stringify(`${source}/components/ScrollingText/scrollingText.jsx`)}`,
+  `export { default as TextArea } from ${JSON.stringify(`${source}/components/TextArea/textArea.jsx`)}`,
+  `export { default as PromptInput } from ${JSON.stringify(`${source}/components/PromptInput/promptInput.jsx`)}`,
   `export { useFormReady } from ${JSON.stringify(`${source}/components/GenericForm/useFormController.js`)}`,
+  `export { default as createHarnessPlugin } from ${JSON.stringify(`${source}/components/HarnessInspector/harnessInspector.js`)}`,
+  `export { default as createHarnessClient } from ${JSON.stringify(`${source}/components/HarnessInspector/harnessClient.js`)}`,
+  `export { HarnessFields } from ${JSON.stringify(`${source}/components/HarnessInspector/harnessForms.jsx`)}`,
+  `export { default as SessionExplorer } from ${JSON.stringify(`${source}/components/HarnessInspector/sessionExplorer.jsx`)}`,
 ].join('\n')
 
 const componentLibrary = () => ({
