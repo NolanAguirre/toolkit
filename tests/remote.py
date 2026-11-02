@@ -647,6 +647,7 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
         (machine/'var/run').mkdir(parents=True)
         (machine/'opt').mkdir()
         (machine/'var/service/.s6-svscan').mkdir(parents=True)
+        (machine/'var/service').chmod(0o755)
         os.mkfifo(machine/'var/service/.s6-svscan/control')
         hosts[name] = machine
     multi = {'MOCK_HOSTS': json.dumps({f'{name}.example': str(machine) for name, machine in hosts.items()})}

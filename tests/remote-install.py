@@ -274,10 +274,18 @@ class RemoteInstall(unittest.TestCase):
             self.assertFalse((base/'state').exists())
         (self.source/'source-choice').write_text('updated source\n')
         (self.source/'.hidden-file').unlink()
+        (self.bin/'remote.bin/host/bootstrap').write_text('#!/bin/sh\nexit 89\n')
+        (self.bin/'remote.bin/host/install').write_text('#!/bin/sh\nexit 89\n')
+        (self.bin/'remote.bin/host/legacy-extra').write_text('leave installed\n')
         self.install()
         self.assertEqual((self.bin/'source-choice').read_text(), 'updated source\n')
         self.assertFalse((self.managed/'.hidden-file').exists(), 'source tree must be replaced')
         self.assertTrue((self.bin/'.hidden-file').exists(), 'install must not prune installed files')
+        self.assertEqual((self.bin/'remote.bin/host/bootstrap').read_bytes(),
+                         (self.source/'remote.bin/host/bootstrap').read_bytes())
+        self.assertEqual((self.bin/'remote.bin/host/install').read_bytes(),
+                         (self.source/'remote.bin/host/install').read_bytes())
+        self.assertEqual((self.bin/'remote.bin/host/legacy-extra').read_text(), 'leave installed\n')
         self.assertEqual((self.host_global/'toolkit/lock').stat().st_ino, inode)
         self.assert_preserved(preserved)
         self.assert_transport(['upload', 'install', 'cleanup'] * 2)
