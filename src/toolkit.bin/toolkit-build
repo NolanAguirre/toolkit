@@ -38,14 +38,15 @@ for source in "$TOOLKIT_SRC_PATH"/* "$TOOLKIT_SRC_PATH"/.[!.]* "$TOOLKIT_SRC_PAT
         atomic_write "$manifest" sh -c 'cat "$1" && printf "%s\n" "$2"' sh "$manifest" "$name"
     fi
 
+    # Replace files so running scripts can finish reading their original copies.
     if [ -L "$source" ]; then
-        cp -P "$source" "$TOOLKIT_BIN_PATH/"
+        cp --remove-destination -P "$source" "$TOOLKIT_BIN_PATH/"
     elif [ -d "$source" ]; then
-        cp -r "$source" "$TOOLKIT_BIN_PATH/"
+        cp --remove-destination -r "$source" "$TOOLKIT_BIN_PATH/"
         find "$TOOLKIT_BIN_PATH/$name" -type d -exec chmod a+rx {} +
         find "$TOOLKIT_BIN_PATH/$name" -type f -exec chmod a+rx {} +
     elif [ -f "$source" ]; then
-        cp -r "$source" "$TOOLKIT_BIN_PATH/"
+        cp --remove-destination -r "$source" "$TOOLKIT_BIN_PATH/"
         chmod a+rx "$TOOLKIT_BIN_PATH/$name"
     fi
 done
