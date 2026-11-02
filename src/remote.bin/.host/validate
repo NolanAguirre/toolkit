@@ -7,7 +7,7 @@ case "$(uname -s)" in
         fail 'supported hosts are Linux and FreeBSD'
         ;;
 esac
-[ "$(id -u)" -eq 0 ] || fail 'host steps must run as root through remote host install'
+[ "$(id -u)" -eq 0 ] || fail 'host steps must run as root through remote this setup-deploy'
 [ "${TOOLKIT_REMOTE_LOCKED:-}" = 1 ] || fail 'host operation must run under s6-setlock'
 umask 022
 command -v getent >/dev/null || fail 'getent is required'

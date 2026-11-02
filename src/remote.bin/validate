@@ -5,10 +5,9 @@
 export STATE_PATH GSTATE_PATH
 set -e
 REMOTE_BIN=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
-# A fresh host has no toolkit state or dependencies yet. The standalone
-# bootstrap and install commands validate their own arguments, OS and root access.
+# Local host preparation validates its own arguments, OS and root access.
 case "$1" in
-    "$REMOTE_BIN/host/bootstrap"|*/remote.bin/host/bootstrap|"$REMOTE_BIN/host/install"|*/remote.bin/host/install)
+    */remote.bin/this/install-dependencies|*/remote.bin/this/setup-deploy|*/remote.bin/host/bootstrap|*/remote.bin/host/install)
         command=$1
         shift
         exec "$command" "$@"
@@ -82,6 +81,9 @@ case "$action" in
         [ "$#" -eq 0 ] || remote_error 'usage: remote ls'
         export REMOTE_STATE REMOTE_BIN
         exec "$command" "$@"
+        ;;
+    remote-install-toolkit)
+        [ "$registry" = 1 ] && [ "$#" -eq 1 ] || remote_error 'usage: remote host install-toolkit <host-name>'
         ;;
     remote-create|remote-edit|remote-load)
         [ -d "$REMOTE_STATE/connections" ] || remote_error 'run toolkit setup remote to initialize JSON connection settings'

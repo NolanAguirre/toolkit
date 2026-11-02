@@ -161,7 +161,7 @@ else: sys.exit(1)
     local_sync.write_text('#!/bin/sh\n[ -z "${FAIL_LOCAL_SYNC:-}" ] || exit 1\nexec /usr/bin/sync "$@"\n')
     local_sync.chmod(0o755)
     ssh = installed/'ssh' 
-    ssh.write_text('''#!/usr/bin/env python3
+    ssh.write_text(r'''#!/usr/bin/env python3
 import json, os, pathlib, shlex, subprocess, sys, time
 # MOCK_HOSTS maps extra target hosts to their own mock host roots.
 hosts = json.loads(os.environ.get('MOCK_HOSTS', '{}'))
@@ -196,7 +196,7 @@ def redirect(text):
     text = text.replace('/usr/local/lib/toolkit-remote', str(lib))
     text = text.replace('/opt/', str(root/'opt') + '/').replace('/var/run', str(root/'var/run')).replace('/var/service', str(root/'var/service')).replace('/run/systemd/system', str(root/'run/systemd/system')).replace('/etc/systemd/system', str(root/'etc/systemd/system')).replace('/usr/local/etc/rc.d/s6', str(root/'usr/local/etc/rc.d/s6'))
     return text.replace('PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"', 'PATH="$PATH"')
-# Stand in for remote host install: place redirected host code where the runner reads it.
+# Stand in for remote this setup-deploy: place redirected host code where the runner reads it.
 src = pathlib.Path(os.environ['MOCK_SRC'])
 lib.mkdir(parents=True, exist_ok=True)
 (lib/'remote-host.sh').write_text(redirect((src/'lib/remote-host.sh').read_text()))
@@ -314,12 +314,12 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     assert not (base('api')/'down').exists()
     assert not (base('api')/'server/current').exists()
     api = base('api')
-    run = (api/'run').read_text()
-    assert '# toolkit-release-run-v1' in run
-    assert '"$release/run"' in run
-    assert 'running-release' in run
-    assert f'server/current/api' not in run
-    assert 'make --no-print-directory start' not in run
+    run_script = (api/'run').read_text()
+    assert '# toolkit-release-run-v1' in run_script
+    assert '"$release/run"' in run_script
+    assert 'running-release' in run_script
+    assert f'server/current/api' not in run_script
+    assert 'make --no-print-directory start' not in run_script
     old_run = "#!/bin/sh\nset -e\nexec 2>&1\nexec s6-envdir ./env s6-setuidgid 'demo-api' ./server/current/run\n"
     (api/'run').write_text(old_run)
     remote('setup', 'service', 'demo', 'api')
@@ -327,7 +327,7 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     (api/'run').write_text('#!/bin/sh\n# custom runner\nexit 0\n')
     remote('setup', 'service', 'demo', 'api')
     assert (api/'run').read_text() == '#!/bin/sh\n# custom runner\nexit 0\n'
-    (api/'run').write_text(run)
+    (api/'run').write_text(run_script)
     assert f"exec s6-setuidgid 'demo-apilog' s6-log t s1048576 n100 ./main" in (api/'log/run').read_text()
     assert api.stat().st_mode & 0o777 == 0o755
     assert (api/'env').stat().st_mode & 0o777 == 0o755
@@ -403,14 +403,14 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     assert (base('api')/'down').exists()
     assert (base('api')/'data/keep').read_text() == 'persistent\n'
     # Reject path conflicts without following links or rewriting permissions.
-    run = base('api')/'run'
-    run.unlink()
+    run_path = base('api')/'run'
+    run_path.unlink()
     victim = root/'victim'
     victim.write_text('preserve\n')
-    run.symlink_to(victim)
+    run_path.symlink_to(victim)
     remote('setup', 'service', 'demo', 'api', ok=False)
     assert victim.read_text() == 'preserve\n'
-    run.unlink()
+    run_path.unlink()
     remote('setup', 'service', 'demo', 'api')
     # Concurrent clients share only the host lock, not the local state lock.
     state2 = root/'state2'

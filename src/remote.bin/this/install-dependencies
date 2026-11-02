@@ -1,13 +1,13 @@
 #!/bin/sh
 ##<help>
-## bootstrap - Install Ubuntu system dependencies for a deployment host.
-## Usage: sudo remote host bootstrap
-## Standalone: sudo sh src/remote.bin/host/bootstrap
+## install-dependencies - Install Ubuntu system packages on this machine.
+## Usage: sudo remote this install-dependencies
+## Standalone: sudo sh src/remote.bin/this/install-dependencies
 ## Run on the host being prepared; no toolkit state or registered repo is needed.
 ## Install s6, Node/npm, Python/venv, native build tools, nginx, SSH and shell utilities.
 ## Safe to rerun: apt keeps installed packages and existing configuration.
 ## Application packages, model weights and NVIDIA drivers remain application/host setup.
-## Does not install the root runner (remote host install) or configure app routes, service accounts or deployments.
+## Does not initialize toolkit state or install the deployment runner.
 ##</help>
 set -eu
 
@@ -21,28 +21,28 @@ case "$#" in
                 exit 0
                 ;;
             *)
-                echo 'usage: sudo remote host bootstrap' >&2
+                echo 'usage: sudo remote this install-dependencies' >&2
                 exit 2
                 ;;
         esac
         ;;
     *)
-        echo 'usage: sudo remote host bootstrap' >&2
+        echo 'usage: sudo remote this install-dependencies' >&2
         exit 2
         ;;
 esac
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo 'error: run host bootstrap with sudo on the host being prepared' >&2
+    echo 'error: run this install-dependencies with sudo on the machine being prepared' >&2
     exit 1
 fi
 if [ ! -r /etc/os-release ]; then
-    echo 'error: host bootstrap requires Ubuntu' >&2
+    echo 'error: this install-dependencies requires Ubuntu' >&2
     exit 1
 fi
 . /etc/os-release
 if [ "${ID:-}" != ubuntu ]; then
-    echo 'error: host bootstrap requires Ubuntu' >&2
+    echo 'error: this install-dependencies requires Ubuntu' >&2
     exit 1
 fi
 
@@ -50,6 +50,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=120 update
 apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
     ca-certificates \
+    age \
     openssh-server \
     openssh-client \
     s6 \
@@ -78,4 +79,4 @@ apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
     daemontools \
     nginx
 
-printf 'Ubuntu host dependencies installed. Next run remote host install <deploy-user>, then remote setup.\n'
+printf 'Ubuntu system dependencies installed.\n'

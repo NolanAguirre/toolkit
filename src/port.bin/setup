@@ -2,28 +2,64 @@
 
 ##<help>
 ## setup - Initialize shared port allocations and personal command history.
-## Usage: toolkit setup port
+## Usage: toolkit setup port; standalone: sh src/port.bin/setup [--shared-only]
+## --shared-only initializes shared state without reading or creating personal state.
 ## Store the registry and lock under GSTATE_PATH/ports; history under STATE_PATH/ports.
 ## An administrator initializes shared state once, then each user runs setup normally.
-## PORT_STATE_GROUP defaults to s6craft-tools; create the group and add users first.
+## Keep an existing registry's group; new registries use PORT_STATE_GROUP (default s6craft-tools).
+## Create the group and add users first.
 ## Preserve existing allocations. Existing personal allocations require manual migration.
 ##</help>
 set -e
-: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+shared_only=0
+case "$#" in
+    0)
+        ;;
+    1)
+        case "$1" in
+            --shared-only)
+                shared_only=1
+                ;;
+            *)
+                echo 'usage: port.bin/setup [--shared-only]' >&2
+                exit 2
+                ;;
+        esac
+        ;;
+    *)
+        echo 'usage: port.bin/setup [--shared-only]' >&2
+        exit 2
+        ;;
+esac
 : "${GSTATE_PATH:=/var/lib/s6craft-tools}"
-: "${PORT_STATE_GROUP:=s6craft-tools}"
-export STATE_PATH GSTATE_PATH
+export GSTATE_PATH
 . "$(dirname "$0")/../lib/locking.sh"
 
 umask 077
-mkdir -p "$STATE_PATH/ports/history"
+if [ "$shared_only" -eq 0 ]; then
+    : "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+    export STATE_PATH
+    mkdir -p "$STATE_PATH/ports/history"
+fi
 STATE_DIR="$GSTATE_PATH/ports"
+if [ -d "$STATE_DIR" ]; then
+    case "$(uname -s)" in
+        FreeBSD)
+            PORT_STATE_GROUP=$(stat -f %Sg "$STATE_DIR")
+            ;;
+        *)
+            PORT_STATE_GROUP=$(stat -c %G "$STATE_DIR")
+            ;;
+    esac
+else
+    : "${PORT_STATE_GROUP:=s6craft-tools}"
+fi
 if [ -f "$STATE_DIR/lock" ] && [ -f "$STATE_DIR/allocate/ports" ]; then
     file_lock "$STATE_DIR/lock"
     echo "port initialized"
     exit 0
 fi
-if [ -d "$STATE_PATH/ports/allocate" ]; then
+if [ "$shared_only" -eq 0 ] && [ -d "$STATE_PATH/ports/allocate" ]; then
     echo "error: migrate existing personal port allocations to $STATE_DIR before setup" >&2
     exit 1
 fi

@@ -18,7 +18,8 @@ manifest="$GLOBAL_STATE_DIR/installed"
 mkdir -p "$TOOLKIT_BIN_PATH"
 
 # Refuse to claim existing files that were not installed by this toolkit.
-for source in "$TOOLKIT_SRC_PATH"/*; do
+for source in "$TOOLKIT_SRC_PATH"/* "$TOOLKIT_SRC_PATH"/.[!.]* "$TOOLKIT_SRC_PATH"/..?*; do
+    [ -e "$source" ] || [ -L "$source" ] || continue
     name=$(basename "$source")
     if [ -e "$TOOLKIT_BIN_PATH/$name" ] || [ -L "$TOOLKIT_BIN_PATH/$name" ]; then
         if ! grep -Fxq -- "$name" "$manifest"; then
@@ -28,7 +29,8 @@ for source in "$TOOLKIT_SRC_PATH"/*; do
     fi
 done
 
-for source in "$TOOLKIT_SRC_PATH"/*; do
+for source in "$TOOLKIT_SRC_PATH"/* "$TOOLKIT_SRC_PATH"/.[!.]* "$TOOLKIT_SRC_PATH"/..?*; do
+    [ -e "$source" ] || [ -L "$source" ] || continue
     name=$(basename "$source")
 
     # Record ownership before copying so interrupted installs remain recoverable.
@@ -36,12 +38,12 @@ for source in "$TOOLKIT_SRC_PATH"/*; do
         atomic_write "$manifest" sh -c 'cat "$1" && printf "%s\n" "$2"' sh "$manifest" "$name"
     fi
 
-    if [ -d "$source" ]; then
+    if [ -L "$source" ]; then
+        cp -P "$source" "$TOOLKIT_BIN_PATH/"
+    elif [ -d "$source" ]; then
         cp -r "$source" "$TOOLKIT_BIN_PATH/"
         find "$TOOLKIT_BIN_PATH/$name" -type d -exec chmod a+rx {} +
         find "$TOOLKIT_BIN_PATH/$name" -type f -exec chmod a+rx {} +
-    elif [ -L "$source" ]; then
-        cp -P "$source" "$TOOLKIT_BIN_PATH/"
     elif [ -f "$source" ]; then
         cp -r "$source" "$TOOLKIT_BIN_PATH/"
         chmod a+rx "$TOOLKIT_BIN_PATH/$name"

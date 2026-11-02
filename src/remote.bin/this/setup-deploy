@@ -1,9 +1,12 @@
 #!/bin/sh
 ##<help>
-## install - Install the root runner that remote deploys use instead of sudo.
-## Usage: sudo remote host install <deploy-user>
-## Standalone: sudo sh src/remote.bin/host/install <deploy-user>
-## Run on the host after host bootstrap; rerun when toolkit updates change host code.
+## setup-deploy - Prepare this machine for an existing deployment user.
+## Usage: sudo remote this setup-deploy <deploy-user>
+## Standalone: sudo sh src/remote.bin/this/setup-deploy <deploy-user>
+## Run after this install-dependencies; rerun explicitly to update the root runner.
+## Add the user to the shared port group and preserve existing port allocations.
+## PORT_STATE_GROUP defaults to the existing registry group, otherwise s6craft-tools.
+## Do not initialize personal toolkit state; reconnect to apply group membership.
 ## Copy host steps to /usr/local/lib/toolkit-remote and supervise s6-sudod on /run/toolkit-remote/sudod.sock.
 ## The socket runs only users, directories, service, supervision, deploy, releases and status.
 ## Allow <deploy-user> through /etc/toolkit-remote/rules; previously allowed users stay.
@@ -16,11 +19,11 @@ case "${1:-}" in
         ;;
 esac
 if [ "$#" -ne 1 ]; then
-    echo 'usage: sudo remote host install <deploy-user>' >&2
+    echo 'usage: sudo remote this setup-deploy <deploy-user>' >&2
     exit 2
 fi
 if [ "$(id -u)" -ne 0 ]; then
-    echo 'error: run host install with sudo on the host being prepared' >&2
+    echo 'error: run this setup-deploy with sudo on the machine being prepared' >&2
     exit 1
 fi
 PATH="/usr/local/sbin:/usr/local/bin:$PATH"
@@ -39,6 +42,42 @@ if [ "${TOOLKIT_REMOTE_LOCKED:-}" != 1 ]; then
 fi
 user=$1
 uid=$(id -u "$user" 2>/dev/null) || fail "unknown user: $user"
+: "${GSTATE_PATH:=/var/lib/s6craft-tools}"
+if [ -d "$GSTATE_PATH/ports" ]; then
+    shared_group=$(file_group "$GSTATE_PATH/ports")
+    if [ -n "${PORT_STATE_GROUP:-}" ] && [ "$PORT_STATE_GROUP" != "$shared_group" ]; then
+        fail "existing port registry belongs to group $shared_group; preserve that group"
+    fi
+    PORT_STATE_GROUP=$shared_group
+else
+    : "${PORT_STATE_GROUP:=s6craft-tools}"
+fi
+export GSTATE_PATH PORT_STATE_GROUP
+if ! getent group "$PORT_STATE_GROUP" >/dev/null; then
+    case "$(uname -s)" in
+        Linux)
+            groupadd "$PORT_STATE_GROUP"
+            ;;
+        FreeBSD)
+            pw groupadd -n "$PORT_STATE_GROUP"
+            ;;
+        *)
+            fail 'setup-deploy requires Linux or FreeBSD'
+            ;;
+    esac
+fi
+case "$(uname -s)" in
+    Linux)
+        usermod -a -G "$PORT_STATE_GROUP" "$user"
+        ;;
+    FreeBSD)
+        pw groupmod "$PORT_STATE_GROUP" -m "$user"
+        ;;
+    *)
+        fail 'setup-deploy requires Linux or FreeBSD'
+        ;;
+esac
+sh "$src/port.bin/setup" --shared-only
 umask 022
 root_group=$(id -gn root)
 lib=/usr/local/lib/toolkit-remote
@@ -114,3 +153,4 @@ until [ -S "$socket" ]; do
     attempt=$((attempt + 1))
 done
 printf 'runner ready\t%s\n' "$socket"
+printf 'Reconnect as %s to apply membership in %s.\n' "$user" "$PORT_STATE_GROUP"

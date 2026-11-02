@@ -1,5 +1,5 @@
 #!/bin/sh
-# Root-side s6-sudod program installed by remote host install; the only code the socket runs.
+# Root-side s6-sudod program installed by remote this setup-deploy; the only code the socket runs.
 # Arguments: <host-version> <repo> <step[,step...]> <service:port>...; deploy reads its archive on stdin.
 set -ef
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -12,7 +12,7 @@ fail() {
 }
 [ "$(id -u)" -eq 0 ] || fail 'host runner must run as root'
 [ "$#" -ge 4 ] || fail 'expected host version, repo, steps and services'
-[ "$1" = "$(cat "$lib/version")" ] || fail 'host code differs from this toolkit; rerun sudo remote host install <user> on the host'
+[ "$1" = "$(cat "$lib/version")" ] || fail 'host code differs from this toolkit; rerun sudo remote this setup-deploy <user> on the host'
 repo=$2
 steps=$(printf '%s\n' "$3" | tr ',' ' ')
 shift 3

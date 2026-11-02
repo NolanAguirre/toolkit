@@ -1,0 +1,195 @@
+#!/bin/sh
+##<help>
+## install-toolkit - Install this laptop's configured toolkit source on a registered host.
+## Usage: remote host install-toolkit <host-name>
+## Upload without a terminal, then open an SSH terminal for interactive sudo.
+## Require basic shell utilities, tar, gzip, sudo and flock; install no packages.
+## Manage root-owned source at /usr/local/src/toolkit/src and preserve host bin settings and state.
+## Refuse other source paths and unmarked destinations. Rerun to recover a failed build.
+## Builds update installed files in place; removed files stay until explicit pruning.
+## Next run sudo remote this install-dependencies and sudo remote this setup-deploy <user> on the host.
+##</help>
+set -e
+. "$REMOTE_BIN/../lib/remote.sh"
+[ "$#" -eq 1 ] || remote_error 'usage: remote host install-toolkit <host-name>'
+[ -f "$REMOTE_CONFIG" ] || remote_error "unknown host: $1"
+remote_target_load "$REMOTE_CONFIG"
+[ -n "$REMOTE_USER" ] || remote_error 'host needs registered address, user and port settings'
+command -v ssh >/dev/null || remote_error 'ssh is required'
+command -v tar >/dev/null || remote_error 'tar is required'
+command -v gzip >/dev/null || remote_error 'gzip is required'
+[ -f "$GSTATE_PATH/toolkit/toolkit-path" ] || remote_error 'toolkit source is not configured; run toolkit setup first'
+source=$(cat "$GSTATE_PATH/toolkit/toolkit-path")
+case "$source" in
+    /*)
+        ;;
+    *)
+        remote_error 'configured toolkit source must be an absolute path'
+        ;;
+esac
+[ -f "$source/toolkit.bin/setup" ] && [ -f "$source/toolkit.bin/toolkit-build" ] || remote_error "invalid toolkit source: $source"
+
+set -- -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -F /dev/null -l "$REMOTE_USER" -p "$REMOTE_PORT"
+if [ -n "$REMOTE_IDENTITY" ]; then
+    set -- "$@" -o IdentitiesOnly=yes -i "$REMOTE_IDENTITY"
+fi
+umask 077
+work=$(mktemp -d)
+upload=
+# Keep the remote path known even if SSH loses the upload's final response.
+trap 'status=$?; trap - 0; if [ -n "$upload" ]; then
+    if ! ssh -T "$@" "$REMOTE_TARGET" "rm -rf -- '\''$upload'\''" </dev/null; then
+        printf "error: could not confirm cleanup on %s; remaining upload may be at %s\n" "$REMOTE_TARGET" "$upload" >&2
+        status=1
+    fi
+fi
+rm -rf -- "$work"
+exit "$status"' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Archive only the configured source tree, including dotfiles and symlinks.
+tar -czf "$work/source.tar.gz" -C "$source" .
+cat > "$work/install.sh" <<'INSTALL'
+#!/bin/sh
+set -e
+[ "$(id -u)" -eq 0 ] || { echo 'error: installation requires sudo' >&2; exit 1; }
+upload=$1
+GSTATE_PATH=/var/lib/s6craft-tools
+GLOBAL_STATE_DIR="$GSTATE_PATH/toolkit"
+TOOLKIT_SRC_PATH=/usr/local/src/toolkit/src
+export GSTATE_PATH GLOBAL_STATE_DIR TOOLKIT_SRC_PATH
+stage=
+previous=
+trap 'status=$?; trap - 0
+if [ -n "$previous" ] && [ -d "$previous" ] && [ ! -e "$TOOLKIT_SRC_PATH" ]; then
+    if ! mv "$previous" "$TOOLKIT_SRC_PATH"; then
+        printf "error: restore source from %s before rerunning\n" "$previous" >&2
+        stage=
+        status=1
+    fi
+fi
+if [ -n "$stage" ]; then
+    if ! rm -rf -- "$stage"; then
+        printf "error: temporary source remains at %s\n" "$stage" >&2
+        status=1
+    fi
+fi
+if ! rm -rf -- "$upload"; then
+    printf "error: upload remains at %s\n" "$upload" >&2
+    status=1
+fi
+exit "$status"' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Reject symlinked control paths before opening the shared installation lock.
+[ ! -L "$GSTATE_PATH" ] && [ ! -L "$GLOBAL_STATE_DIR" ] && [ ! -L "$GLOBAL_STATE_DIR/lock" ] || {
+    echo 'error: toolkit state and lock must not be symlinks' >&2
+    exit 1
+}
+umask 022
+mkdir -p "$GLOBAL_STATE_DIR"
+exec 9>>"$GLOBAL_STATE_DIR/lock"
+flock -x 9
+if [ -e "$GLOBAL_STATE_DIR/toolkit-path" ] || [ -L "$GLOBAL_STATE_DIR/toolkit-path" ]; then
+    [ -f "$GLOBAL_STATE_DIR/toolkit-path" ] && [ ! -L "$GLOBAL_STATE_DIR/toolkit-path" ] &&
+        [ "$(cat "$GLOBAL_STATE_DIR/toolkit-path")" = "$TOOLKIT_SRC_PATH" ] || {
+        echo 'error: existing toolkit points elsewhere; keep that checkout or migrate it explicitly' >&2
+        exit 1
+    }
+fi
+marker="$GLOBAL_STATE_DIR/managed-source"
+if [ -e "$marker" ] || [ -L "$marker" ]; then
+    [ -f "$marker" ] && [ ! -L "$marker" ] && [ "$(cat "$marker")" = "$TOOLKIT_SRC_PATH" ] || {
+        echo "error: conflicting managed source marker: $marker" >&2
+        exit 1
+    }
+elif [ -e "$TOOLKIT_SRC_PATH" ] || [ -L "$TOOLKIT_SRC_PATH" ]; then
+    echo "error: refusing unmarked source destination: $TOOLKIT_SRC_PATH" >&2
+    exit 1
+fi
+[ ! -L /usr/local/src ] && [ ! -L /usr/local/src/toolkit ] && [ ! -L "$TOOLKIT_SRC_PATH" ] || {
+    echo 'error: managed source directories must not be symlinks' >&2
+    exit 1
+}
+if [ -e "$TOOLKIT_SRC_PATH" ] && [ ! -d "$TOOLKIT_SRC_PATH" ]; then
+    echo "error: source destination is not a directory: $TOOLKIT_SRC_PATH" >&2
+    exit 1
+fi
+
+mkdir -p /usr/local/src/toolkit
+chown "root:$(id -gn root)" /usr/local/src/toolkit
+chmod 755 /usr/local/src/toolkit
+stage=$(mktemp -d /usr/local/src/toolkit/.install.XXXXXX)
+# Extract a private copy, so the upload cannot change underneath setup/build.
+cp "$upload/source.tar.gz" "$stage/source.tar.gz"
+mkdir "$stage/src"
+tar -xzf "$stage/source.tar.gz" -C "$stage/src"
+[ -f "$stage/src/toolkit.bin/setup" ] && [ -f "$stage/src/toolkit.bin/toolkit-build" ] || {
+    echo 'error: uploaded source is missing toolkit setup/build' >&2
+    exit 1
+}
+chown -hR "root:$(id -gn root)" "$stage/src"
+chmod -R go-w "$stage/src"
+chmod 755 "$stage/src"
+. "$stage/src/lib/files.sh"
+# Record ownership before publishing source, allowing an interrupted first install to retry.
+ATOMIC_WRITE_MODE=644 atomic_write "$marker" printf '%s\n' "$TOOLKIT_SRC_PATH"
+if [ -d "$TOOLKIT_SRC_PATH" ]; then
+    previous="$stage/previous"
+    mv "$TOOLKIT_SRC_PATH" "$previous"
+fi
+mv "$stage/src" "$TOOLKIT_SRC_PATH"
+
+# Descriptor 9 holds the toolkit lock across setup and build; bypass dispatcher validation.
+sh "$TOOLKIT_SRC_PATH/toolkit.bin/setup" --shared-only --locked
+TOOLKIT_BIN_PATH=$(cat "$GLOBAL_STATE_DIR/bin-path")
+export TOOLKIT_BIN_PATH
+sh "$TOOLKIT_SRC_PATH/toolkit.bin/toolkit-build"
+printf 'toolkit source installed\t%s\n' "$TOOLKIT_SRC_PATH"
+INSTALL
+tar -czf "$work/upload.tar.gz" -C "$work" install.sh source.tar.gz
+
+# A local mktemp name supplies a shell-safe unique remote directory name.
+token=${work##*/}
+case "$token" in
+    ''|*[!a-zA-Z0-9._-]*)
+        remote_error 'mktemp returned an unsupported directory name'
+        ;;
+esac
+upload="/tmp/toolkit-upload.$token"
+upload_command="upload='$upload'
+$(cat <<'UPLOAD'
+set -e
+command -v sh >/dev/null || { echo 'error: missing prerequisite: sh' >&2; exit 1; }
+command -v tar >/dev/null || { echo 'error: missing prerequisite: tar' >&2; exit 1; }
+command -v gzip >/dev/null || { echo 'error: missing prerequisite: gzip' >&2; exit 1; }
+command -v sudo >/dev/null || { echo 'error: missing prerequisite: sudo' >&2; exit 1; }
+command -v flock >/dev/null || { echo 'error: missing prerequisite: flock' >&2; exit 1; }
+command -v mkdir >/dev/null || { echo 'error: missing prerequisite: mkdir' >&2; exit 1; }
+command -v mktemp >/dev/null || { echo 'error: missing prerequisite: mktemp' >&2; exit 1; }
+command -v cp >/dev/null || { echo 'error: missing prerequisite: cp' >&2; exit 1; }
+command -v mv >/dev/null || { echo 'error: missing prerequisite: mv' >&2; exit 1; }
+command -v rm >/dev/null || { echo 'error: missing prerequisite: rm' >&2; exit 1; }
+command -v chmod >/dev/null || { echo 'error: missing prerequisite: chmod' >&2; exit 1; }
+command -v chown >/dev/null || { echo 'error: missing prerequisite: chown' >&2; exit 1; }
+command -v dirname >/dev/null || { echo 'error: missing prerequisite: dirname' >&2; exit 1; }
+command -v basename >/dev/null || { echo 'error: missing prerequisite: basename' >&2; exit 1; }
+command -v cat >/dev/null || { echo 'error: missing prerequisite: cat' >&2; exit 1; }
+command -v grep >/dev/null || { echo 'error: missing prerequisite: grep' >&2; exit 1; }
+command -v find >/dev/null || { echo 'error: missing prerequisite: find' >&2; exit 1; }
+command -v sync >/dev/null || { echo 'error: missing prerequisite: sync' >&2; exit 1; }
+command -v id >/dev/null || { echo 'error: missing prerequisite: id' >&2; exit 1; }
+umask 077
+mkdir "$upload"
+trap 'rm -rf -- "$upload"' 0
+trap 'exit 1' HUP INT TERM
+tar -xzf - -C "$upload"
+trap - 0 HUP INT TERM
+UPLOAD
+)"
+ssh -T "$@" "$REMOTE_TARGET" "$upload_command" < "$work/upload.tar.gz"
+ssh -tt "$@" "$REMOTE_TARGET" "sudo sh '$upload/install.sh' '$upload'"

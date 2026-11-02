@@ -119,7 +119,7 @@ remote_targets_select() {
     done || exit 1
 }
 
-# Host code installed by remote host install; the client sends its hash so stale hosts refuse to run.
+# Host code installed by remote this setup-deploy; stale hosts refuse to run.
 remote_host_steps='users directories service supervision deploy releases status'
 
 # remote_host_version <src>: hash the helpers, validator, runner and steps in install order.
@@ -135,7 +135,7 @@ remote_host_version() (
 
 # remote_command step...: ask the host's root runner (s6-sudod) for whitelisted steps; no script is sent.
 remote_command() {
-    printf "[ -S /run/toolkit-remote/sudod.sock ] || { echo 'error: run sudo remote host install <user> on the host first' >&2; exit 1; }; "
+    printf "[ -S /run/toolkit-remote/sudod.sock ] || { echo 'error: run sudo remote this setup-deploy <user> on the host first' >&2; exit 1; }; "
     printf 'PATH="/usr/local/bin:$PATH" exec s6-sudo -e /run/toolkit-remote/sudod.sock'
     printf " '%s'" "$(remote_host_version "$REMOTE_BIN/..")" "$REMOTE_REPO" "$(printf '%s\n' "$@" | paste -sd, -)"
     while IFS= read -r entry; do
