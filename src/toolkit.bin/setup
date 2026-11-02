@@ -2,17 +2,38 @@
 
 ##<help>
 ## setup - Initialize personal state and shared installation settings.
-## Usage: sudo env TOOLKIT_SRC_PATH=/absolute/path/to/src sh src/toolkit.bin/setup
+## Usage: sudo env TOOLKIT_SRC_PATH=/absolute/path/to/src sh src/toolkit.bin/setup [--shared-only] [--locked]
 ## STATE_PATH defaults to $HOME/.s6craft-tools; GSTATE_PATH to /var/lib/s6craft-tools.
 ## TOOLKIT_BIN_PATH defaults to /usr/local/bin. Existing settings are preserved.
+## --shared-only skips personal state; --locked reuses the installer's lock on fd 9.
 ## Run toolkit build with permission to write the installation and global state.
 ## Each user runs toolkit setup --all to initialize their personal tool state.
 ##</help>
 
 set -e
-: "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+shared_only=false
+locked=false
+for option in "$@"; do
+    case "$option" in
+        --shared-only)
+            shared_only=true
+            ;;
+        --locked)
+            locked=true
+            ;;
+        *)
+            echo "error: unknown setup option: $option" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$shared_only" = false ]; then
+    : "${STATE_PATH:=${HOME:?HOME is not set}/.s6craft-tools}"
+    export STATE_PATH
+fi
 : "${GSTATE_PATH:=/var/lib/s6craft-tools}"
-export STATE_PATH GSTATE_PATH
+export GSTATE_PATH
 
 : "${TOOLKIT_SRC_PATH:?TOOLKIT_SRC_PATH is not set}"
 . "$(dirname "$0")/../lib/locking.sh"
@@ -21,8 +42,16 @@ export STATE_PATH GSTATE_PATH
 GLOBAL_STATE_DIR="$GSTATE_PATH/toolkit"
 BIN_PATH="${TOOLKIT_BIN_PATH:-/usr/local/bin}"
 umask 022
+if [ "$locked" = true ]; then
+    if ! flock -n -x 9; then
+        echo "error: inherited toolkit lock on descriptor 9 is unavailable" >&2
+        exit 1
+    fi
+fi
 mkdir -p "$GLOBAL_STATE_DIR"
-file_lock "$GLOBAL_STATE_DIR/lock"
+if [ "$locked" = false ]; then
+    file_lock "$GLOBAL_STATE_DIR/lock"
+fi
 if [ ! -f "$GLOBAL_STATE_DIR/bin-path" ]; then
     atomic_write "$GLOBAL_STATE_DIR/bin-path" printf '%s\n' "$BIN_PATH"
     chmod 644 "$GLOBAL_STATE_DIR/bin-path"
@@ -33,6 +62,8 @@ if [ ! -f "$GLOBAL_STATE_DIR/toolkit-path" ]; then
 fi
 : >> "$GLOBAL_STATE_DIR/installed"
 
-umask 077
-mkdir -p "$STATE_PATH/toolkit/history" "$STATE_PATH/toolkit/tests"
+if [ "$shared_only" = false ]; then
+    umask 077
+    mkdir -p "$STATE_PATH/toolkit/history" "$STATE_PATH/toolkit/tests"
+fi
 echo "toolkit setup complete"

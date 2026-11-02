@@ -24,11 +24,13 @@ setup_one() {
         exit 1
     fi
 
-    # Port setup handles both shared allocations and private history under its lock.
-    if [ "$NAME" = port ]; then
-        "$SETUP"
-        return "$?"
-    fi
+    # These setups preserve existing allocations and encryption keys directly.
+    case "$NAME" in
+        port|encrypt)
+            "$SETUP"
+            return "$?"
+            ;;
+    esac
 
     STATE_NAME="$NAME"
     if [ -f "$TOOLKIT_BIN_PATH/$NAME.bin/state-name" ]; then
@@ -101,7 +103,8 @@ case "$1" in
             fi
 
             name=$(basename "$directory" .bin)
-            setup_one "$name" || rc=1
+            # A separate shell keeps set -e effective despite this || condition.
+            sh "$0" "$name" || rc=1
         done
         exit "$rc"
         ;;
