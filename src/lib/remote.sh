@@ -119,62 +119,34 @@ remote_targets_select() {
     done || exit 1
 }
 
-# Build one complete script for every target; staged on the host before executing under the portable s6 lock.
-remote_payload() {
-    cat <<'WRAPPER'
-#!/bin/sh
-set -e
-[ "$(id -u)" -eq 0 ] || { echo 'error: root access through sudo -n is required' >&2; exit 1; }
-PATH="/usr/local/sbin:/usr/local/bin:$PATH"
-export PATH
-command -v s6-setlock >/dev/null || { echo 'error: install s6 first' >&2; exit 1; }
-umask 077
-[ ! -L /var/run/toolkit-remote.lock ] || { echo 'error: host lock must not be a symlink' >&2; exit 1; }
-remote_host_script=$(mktemp /tmp/toolkit-host.XXXXXX)
-trap 'rm -f "$remote_host_script"' 0
-trap 'exit 1' HUP INT TERM
-cat > "$remote_host_script" <<'TOOLKIT_HOST_SCRIPT'
-WRAPPER
-    cat <<SCRIPT
-#!/bin/sh
-set -e
-repo='$REMOTE_REPO'
-SCRIPT
-    printf 'set --'
+# Host code installed by remote host install; the client sends its hash so stale hosts refuse to run.
+remote_host_steps='users directories service supervision deploy releases status'
+
+# remote_host_version <src>: hash the helpers, validator, runner and steps in install order.
+remote_host_version() (
+    cd "$1"
+    set -- lib/remote-host.sh remote.bin/.host/validate remote.bin/.host/run
+    for step in $remote_host_steps; do
+        set -- "$@" "remote.bin/.host/$step"
+    done
+    hash=$(cat "$@" | sha256sum)
+    printf '%s\n' "${hash%% *}"
+)
+
+# remote_command step...: ask the host's root runner (s6-sudod) for whitelisted steps; no script is sent.
+remote_command() {
+    printf "[ -S /run/toolkit-remote/sudod.sock ] || { echo 'error: run sudo remote host install <user> on the host first' >&2; exit 1; }; "
+    printf 'PATH="/usr/local/bin:$PATH" exec s6-sudo -e /run/toolkit-remote/sudod.sock'
+    printf " '%s'" "$(remote_host_version "$REMOTE_BIN/..")" "$REMOTE_REPO" "$(printf '%s\n' "$@" | paste -sd, -)"
     while IFS= read -r entry; do
         printf " '%s'" "$entry"
     done < "$REMOTE_MANIFEST"
     printf '\n'
-    cat "$REMOTE_BIN/../lib/remote-host.sh"
-    cat "$REMOTE_BIN/.host/validate"
-    if [ -n "${REMOTE_ARCHIVE:-}" ]; then
-        cat <<'SCRIPT'
-archive=$(mktemp /tmp/toolkit-release.XXXXXX)
-trap 'rm -f "$archive"' 0
-trap 'exit 1' HUP INT TERM
-base64 -d > "$archive" <<'TOOLKIT_RELEASE_ARCHIVE'
-SCRIPT
-        base64 "$REMOTE_ARCHIVE"
-        printf 'TOOLKIT_RELEASE_ARCHIVE\n'
-    fi
-    for step in "$@"; do
-        if [ "$step" = service ]; then
-            # Install the same portable atomic-write helpers used by host commands.
-            printf "host_helpers=\$(cat <<'TOOLKIT_HOST_HELPERS'\n"
-            cat "$REMOTE_BIN/../lib/remote-host.sh"
-            printf '\nTOOLKIT_HOST_HELPERS\n)\n'
-        fi
-        cat "$REMOTE_BIN/.host/$step"
-    done
-    cat <<'WRAPPER'
-TOOLKIT_HOST_SCRIPT
-s6-setlock -d 9 /var/run/toolkit-remote.lock env TOOLKIT_REMOTE_LOCKED=1 sh "$remote_host_script"
-WRAPPER
 }
 
-# remote_ssh <payload>: run a built payload on the loaded target.
+# remote_ssh <command>: run the runner command on the loaded target; deploy streams $REMOTE_ARCHIVE.
 remote_ssh() (
-    payload=$1
+    command=$1
     set -- -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10
     if [ -n "$REMOTE_USER" ]; then
         set -- "$@" -F /dev/null -l "$REMOTE_USER" -p "$REMOTE_PORT"
@@ -182,7 +154,7 @@ remote_ssh() (
             set -- "$@" -o IdentitiesOnly=yes -i "$REMOTE_IDENTITY"
         fi
     fi
-    ssh "$@" "$REMOTE_TARGET" 'sudo -n sh -s' < "$payload"
+    ssh "$@" "$REMOTE_TARGET" "$command" < "${REMOTE_ARCHIVE:-/dev/null}"
 )
 
 # remote_each step...: run the steps on every $REMOTE_TARGETS line in parallel, prefixing output by target.
@@ -190,14 +162,14 @@ remote_each() (
     work=$(mktemp -d "$REMOTE_STATE/.each.XXXXXX")
     trap 'rm -rf -- "$work"' 0
     trap 'exit 1' HUP INT TERM
-    remote_payload "$@" > "$work/payload"
+    command=$(remote_command "$@")
     tab=$(printf '\t')
     while IFS="$tab" read -r name path; do
         (
             {
                 {
                     status=0
-                    (remote_target_load "$path" && remote_ssh "$work/payload") || status=$?
+                    (remote_target_load "$path" && remote_ssh "$command") || status=$?
                     printf '%s\n' "$status" > "$work/$name.status"
                 } 2>&1 1>&3 3>&- | sed "s/^/$name$tab/" >&2
             } 3>&1 | sed "s/^/$name$tab/"

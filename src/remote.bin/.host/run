@@ -1,0 +1,85 @@
+#!/bin/sh
+# Root-side s6-sudod program installed by remote host install; the only code the socket runs.
+# Arguments: <host-version> <repo> <step[,step...]> <service:port>...; deploy reads its archive on stdin.
+set -ef
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+lib=/usr/local/lib/toolkit-remote
+umask 077
+fail() {
+    printf 'error: %s\n' "$*" >&2
+    exit 1
+}
+[ "$(id -u)" -eq 0 ] || fail 'host runner must run as root'
+[ "$#" -ge 4 ] || fail 'expected host version, repo, steps and services'
+[ "$1" = "$(cat "$lib/version")" ] || fail 'host code differs from this toolkit; rerun sudo remote host install <user> on the host'
+repo=$2
+steps=$(printf '%s\n' "$3" | tr ',' ' ')
+shift 3
+case "$repo" in
+    ''|[!a-zA-Z0-9]*|*[!a-zA-Z0-9._-]*)
+        fail 'invalid repo name'
+        ;;
+esac
+[ -n "$steps" ] || fail 'no steps requested'
+# Whitelist: every root operation the client may request.
+for step in $steps; do
+    case "$step" in
+        users|directories|service|supervision|deploy|releases|status)
+            ;;
+        *)
+            fail "step not allowed: $step"
+            ;;
+    esac
+done
+for entry in "$@"; do
+    case "${entry%:*}:${entry##*:}" in
+        "$entry")
+            ;;
+        *)
+            fail "invalid service entry: $entry"
+            ;;
+    esac
+    case "${entry%:*}" in
+        ''|[!a-zA-Z0-9]*|*[!a-zA-Z0-9._-]*)
+            fail "invalid service entry: $entry"
+            ;;
+    esac
+    case "${entry##*:}" in
+        -)
+            ;;
+        ''|*[!0-9]*)
+            fail "invalid service entry: $entry"
+            ;;
+    esac
+done
+command -v s6-setlock >/dev/null || fail 'install s6 first'
+[ ! -L /var/run/toolkit-remote.lock ] || fail 'host lock must not be a symlink'
+script=$(mktemp /tmp/toolkit-host.XXXXXX)
+archive=
+trap 'rm -f "$script" ${archive:+"$archive"}' 0
+trap 'exit 1' HUP INT TERM
+for step in $steps; do
+    if [ "$step" = deploy ] && [ -z "$archive" ]; then
+        archive=$(mktemp /tmp/toolkit-release.XXXXXX)
+        cat > "$archive"
+    fi
+done
+{
+    printf "#!/bin/sh\nset -e\nrepo='%s'\n" "$repo"
+    printf 'set --'
+    printf " '%s'" "$@"
+    printf '\n'
+    [ -z "$archive" ] || printf "archive='%s'\n" "$archive"
+    cat "$lib/remote-host.sh" "$lib/validate"
+    for step in $steps; do
+        if [ "$step" = service ]; then
+            # Install the same portable atomic-write helpers used by host commands.
+            printf "host_helpers=\$(cat <<'TOOLKIT_HOST_HELPERS'\n"
+            cat "$lib/remote-host.sh"
+            printf '\nTOOLKIT_HOST_HELPERS\n)\n'
+        fi
+        cat "$lib/$step"
+    done
+} > "$script"
+s6-setlock -d 9 /var/run/toolkit-remote.lock env TOOLKIT_REMOTE_LOCKED=1 sh "$script"

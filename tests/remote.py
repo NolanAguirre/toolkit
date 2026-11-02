@@ -1,6 +1,6 @@
 """Temporary-state remote tests. SSH and privileged host utilities are mocked.
 
-The received shell script runs locally with /var and /run paths redirected into
+The host runner and steps run locally with /var and /run paths redirected into
 this temporary directory. No network access or actual user/ownership changes.
 """
 import concurrent.futures
@@ -162,23 +162,26 @@ else: sys.exit(1)
     local_sync.chmod(0o755)
     ssh = installed/'ssh' 
     ssh.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys, time
+import json, os, pathlib, shlex, subprocess, sys, time
 # MOCK_HOSTS maps extra target hosts to their own mock host roots.
 hosts = json.loads(os.environ.get('MOCK_HOSTS', '{}'))
 target = sys.argv[-2]
 root = pathlib.Path(hosts.get(target, os.environ['MOCK_HOST']))
 expected = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10']
 if target in hosts:
-    expected += ['-F', '/dev/null', '-l', 'deployer', '-p', '22', target, 'sudo -n sh -s']
+    expected += ['-F', '/dev/null', '-l', 'deployer', '-p', '22', target]
 elif '-F' in sys.argv:
     expected += ['-F', '/dev/null', '-l', 'deployer', '-p', '2222', '-o', 'IdentitiesOnly=yes', '-i', str(root.parent/'key with spaces')]
-    expected += ['192.0.2.10', 'sudo -n sh -s']
+    expected += ['192.0.2.10']
 else:
-    expected += ['test-pi', 'sudo -n sh -s']
-assert sys.argv[1:] == expected, sys.argv
-script = sys.stdin.read()
-with (root/'ssh-calls').open('a') as log: log.write('call\\n')
-(root/'last-script').write_text(script)
+    expected += ['test-pi']
+assert sys.argv[1:-1] == expected, sys.argv
+# The client only sends runner arguments; the archive (if any) arrives on stdin.
+_, sep, runner_args = sys.argv[-1].partition('exec s6-sudo -e /run/toolkit-remote/sudod.sock ')
+assert sep, sys.argv[-1]
+args = shlex.split(runner_args)
+data = sys.stdin.buffer.read()
+with (root/'ssh-calls').open('a') as log: log.write('call\n')
 if os.environ.get('FAIL_SSH') or os.environ.get('FAIL_SSH_HOST') == target: sys.exit(255)
 # Every target must arrive before any proceeds, proving targets run in parallel.
 barrier = os.environ.get('MOCK_SSH_BARRIER')
@@ -188,15 +191,25 @@ if barrier:
     while len(list(pathlib.Path(barrier).iterdir())) < int(os.environ['MOCK_SSH_BARRIER_COUNT']):
         if time.monotonic() > deadline: sys.exit(254)
         time.sleep(.02)
-script = script.replace('/opt/', str(root/'opt') + '/').replace('/var/run', str(root/'var/run')).replace('/var/service', str(root/'var/service')).replace('/run/systemd/system', str(root/'run/systemd/system')).replace('/etc/systemd/system', str(root/'etc/systemd/system')).replace('/usr/local/etc/rc.d/s6', str(root/'usr/local/etc/rc.d/s6'))
-script = script.replace('PATH="/usr/local/sbin:/usr/local/bin:$PATH"', 'PATH="$PATH"')
+lib = root/'usr/local/lib/toolkit-remote'
+def redirect(text):
+    text = text.replace('/usr/local/lib/toolkit-remote', str(lib))
+    text = text.replace('/opt/', str(root/'opt') + '/').replace('/var/run', str(root/'var/run')).replace('/var/service', str(root/'var/service')).replace('/run/systemd/system', str(root/'run/systemd/system')).replace('/etc/systemd/system', str(root/'etc/systemd/system')).replace('/usr/local/etc/rc.d/s6', str(root/'usr/local/etc/rc.d/s6'))
+    return text.replace('PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"', 'PATH="$PATH"')
+# Stand in for remote host install: place redirected host code where the runner reads it.
+src = pathlib.Path(os.environ['MOCK_SRC'])
+lib.mkdir(parents=True, exist_ok=True)
+(lib/'remote-host.sh').write_text(redirect((src/'lib/remote-host.sh').read_text()))
+for name in ('validate', 'run', 'users', 'directories', 'service', 'supervision', 'deploy', 'releases', 'status'):
+    (lib/name).write_text(redirect((src/'remote.bin/.host'/name).read_text()))
+(lib/'version').write_text(args[0] + '\n')
 env = dict(os.environ, MOCK_HOST=str(root), PATH=os.environ['MOCK_BIN'] + ':' + os.environ['PATH'])
-sys.exit(subprocess.run(['sh', '-s'], input=script, text=True, env=env).returncode)
+sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).returncode)
 ''')
     ssh.chmod(0o755)
     env = dict(os.environ, STATE_PATH=str(root/'state'), GSTATE_PATH=str(root/'global'), PORT_STATE_GROUP=str(os.getgid()), HOME=str(root/'home'),
                USER='tester', ENV_USER='tester', TOOLKIT_HIST_LOCK='1',
-               MOCK_HOST=str(host), MOCK_BIN=str(mocks),
+               MOCK_HOST=str(host), MOCK_BIN=str(mocks), MOCK_SRC=str(installed),
                PATH=str(installed) + ':' + os.environ['PATH'])
 
     def run(tool, *args, ok=True, extra=None):

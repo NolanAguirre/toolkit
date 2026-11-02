@@ -7,7 +7,7 @@
 ## Install s6, Node/npm, Python/venv, native build tools, nginx, SSH and shell utilities.
 ## Safe to rerun: apt keeps installed packages and existing configuration.
 ## Application packages, model weights and NVIDIA drivers remain application/host setup.
-## Does not grant sudo access or configure app routes, service accounts or deployments.
+## Does not install the root runner (remote host install) or configure app routes, service accounts or deployments.
 ##</help>
 set -eu
 
@@ -78,4 +78,4 @@ apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
     daemontools \
     nginx
 
-printf 'Ubuntu host dependencies installed. Configure application services with remote setup.\n'
+printf 'Ubuntu host dependencies installed. Next run remote host install <deploy-user>, then remote setup.\n'

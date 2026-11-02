@@ -330,3 +330,75 @@ s6-svc -t "$service_dir"
 printf '%s\n' "$release"
 DEPLOY
 }
+
+# start_scanner: find s6 and reuse a running /var/service scanner, or start one through systemd / FreeBSD rc.d.
+start_scanner() {
+    scanner=$(command -v s6-svscan) || fail 'install s6 first'
+    scannerctl=$(command -v s6-svscanctl) || fail 'install s6 first'
+    case "$scanner:$scannerctl" in
+        *[!a-zA-Z0-9/:._-]*) fail 'unsupported s6 executable path' ;;
+    esac
+    case "$scanner" in
+        /*) ;;
+        *) fail 's6-svscan must resolve to an absolute path' ;;
+    esac
+    case "$scannerctl" in
+        /*) ;;
+        *) fail 's6-svscanctl must resolve to an absolute path' ;;
+    esac
+    # Other host services may already share this scanner. Never replace a running scanner.
+    if ! "$scannerctl" -a /var/service 2>/dev/null; then
+        case "$(uname -s)" in
+            Linux)
+                [ -d /run/systemd/system ] || fail 'start s6-svscan /var/service through the host startup first'
+                command -v systemctl >/dev/null || fail 'systemctl is required to start the s6 scanner on this host'
+                unit_file=/etc/systemd/system/toolkit-remote-svscan.service
+                require_directory /etc/systemd/system root 755
+                require_file_target "$unit_file"
+                unit_content=$(cat <<UNIT
+[Unit]
+Description=Toolkit s6 scanner
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=$scanner /var/service
+ExecStop=$scannerctl -t /var/service
+Restart=on-failure
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+)
+                if [ -f "$unit_file" ]; then
+                    [ "$(cat "$unit_file")" = "$unit_content" ] || fail "conflicting scanner launcher: $unit_file"
+                else
+                    fragment=$(systemctl show --property=FragmentPath --value toolkit-remote-svscan.service)
+                    [ -z "$fragment" ] || fail "scanner launcher already provided by $fragment"
+                fi
+                dropins=$(systemctl show --property=DropInPaths --value toolkit-remote-svscan.service)
+                [ -z "$dropins" ] || fail "conflicting scanner drop-ins: $dropins"
+                atomic_to "$unit_file" "root:$root_group" 644 printf '%s\n' "$unit_content"
+                systemctl daemon-reload
+                systemctl enable --now toolkit-remote-svscan.service 9>&-
+                ;;
+            FreeBSD)
+                [ -x /usr/local/etc/rc.d/s6 ] || fail 'install the FreeBSD sysutils/s6 package first'
+                configured_scan=$(sysrc -n s6_path 2>/dev/null || :)
+                [ -z "$configured_scan" ] || [ "$configured_scan" = /var/service ] || fail "s6_path already points to $configured_scan"
+                sysrc s6_enable=YES s6_path=/var/service
+                if ! service s6 onestatus >/dev/null 2>&1; then
+                    env -u TOOLKIT_REMOTE_LOCKED service s6 start 9>&-
+                fi
+                ;;
+        esac
+        attempt=0
+        until "$scannerctl" -a /var/service 2>/dev/null; do
+            [ "$attempt" -lt 10 ] || fail 's6 scanner did not become ready within 10 seconds'
+            sleep 1
+            attempt=$((attempt + 1))
+        done
+    fi
+}
