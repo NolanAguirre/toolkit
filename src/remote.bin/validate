@@ -5,6 +5,15 @@
 export STATE_PATH GSTATE_PATH
 set -e
 REMOTE_BIN=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
+# A fresh host has no toolkit state or dependencies yet. The standalone
+# bootstrap command validates its own arguments, OS and root access.
+case "$1" in
+    "$REMOTE_BIN/host/bootstrap"|*/remote.bin/host/bootstrap)
+        command=$1
+        shift
+        exec "$command" "$@"
+        ;;
+esac
 . "$REMOTE_BIN/../lib/locking.sh"
 . "$REMOTE_BIN/../lib/remote.sh"
 : "${STATE_PATH:?STATE_PATH is not set}"

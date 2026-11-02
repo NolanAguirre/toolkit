@@ -1,0 +1,81 @@
+#!/bin/sh
+##<help>
+## bootstrap - Install Ubuntu system dependencies for a deployment host.
+## Usage: sudo remote host bootstrap
+## Standalone: sudo sh src/remote.bin/host/bootstrap
+## Run on the host being prepared; no toolkit state or registered repo is needed.
+## Install s6, Node/npm, Python/venv, native build tools, nginx, SSH and shell utilities.
+## Safe to rerun: apt keeps installed packages and existing configuration.
+## Application packages, model weights and NVIDIA drivers remain application/host setup.
+## Does not grant sudo access or configure app routes, service accounts or deployments.
+##</help>
+set -eu
+
+case "$#" in
+    0)
+        ;;
+    1)
+        case "$1" in
+            --help|-h)
+                sed -n '/^##<help>$/,/^##<\/help>$/ { /^##</d; s/^## //; p; }' "$0"
+                exit 0
+                ;;
+            *)
+                echo 'usage: sudo remote host bootstrap' >&2
+                exit 2
+                ;;
+        esac
+        ;;
+    *)
+        echo 'usage: sudo remote host bootstrap' >&2
+        exit 2
+        ;;
+esac
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo 'error: run host bootstrap with sudo on the host being prepared' >&2
+    exit 1
+fi
+if [ ! -r /etc/os-release ]; then
+    echo 'error: host bootstrap requires Ubuntu' >&2
+    exit 1
+fi
+. /etc/os-release
+if [ "${ID:-}" != ubuntu ]; then
+    echo 'error: host bootstrap requires Ubuntu' >&2
+    exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get -o DPkg::Lock::Timeout=120 update
+apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
+    ca-certificates \
+    openssh-server \
+    openssh-client \
+    s6 \
+    sudo \
+    util-linux \
+    procps \
+    libc-bin \
+    coreutils \
+    findutils \
+    sed \
+    grep \
+    mawk \
+    passwd \
+    tar \
+    gzip \
+    curl \
+    git \
+    jq \
+    rsync \
+    nodejs \
+    npm \
+    python3 \
+    python3-venv \
+    python3-dev \
+    build-essential \
+    daemontools \
+    nginx
+
+printf 'Ubuntu host dependencies installed. Configure application services with remote setup.\n'
