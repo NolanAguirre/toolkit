@@ -4,9 +4,16 @@
 bootstrap_error() { echo "error: $*" >&2; exit 1; }
 
 # Preserve existing files, directories and even dangling links on re-import.
-bootstrap_link_missing() {
+bootstrap_install_missing() {
     if [ ! -e "$2" ] && [ ! -L "$2" ]; then
-        ln -sT -- "$1" "$2"
+        case "${3:-link}" in
+            copy)
+                cp -L -- "$1" "$2"
+                ;;
+            link)
+                ln -sT -- "$1" "$2"
+                ;;
+        esac
     fi
 }
 

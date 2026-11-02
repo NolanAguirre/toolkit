@@ -1,11 +1,13 @@
 #!/bin/sh
 ##<help>
 ## create - Create ./<name>, link shared rules and skills, reserve 100 ports and select it.
-## Usage: bootstrap repo create <name> [--support=nginx]
+## Usage: bootstrap repo create <name> [--copy-rules] [--support=nginx]
 ## Requires initialized port toolkit and shared rules in ~/.s6craft.
 ## Link every ~/.s6craft/.cursor/rules/*.mdc, including db-schema.mdc scoped to db/**.
 ## Link ~/.s6craft/CLAUDE.md, CODEX.md and every .claude/rules/*.md.
 ## Link each ~/.s6craft/<dir>/CODEX.md when the new repository has <dir>, such as ui and db.
+## --copy-rules copies rule files, including scoped CODEX.md, .cursorrules and .cursorignore.
+## Copies can be edited locally; existing files/links are preserved and skills remain linked.
 ## Add project_doc_fallback_filenames = ["CODEX.md"] to ${CODEX_HOME:-~/.codex}/config.toml if missing.
 ## Link each skill directory containing SKILL.md from ~/.s6craft/.cursor/skills.
 ## Link ~/.s6craft/.cursorignore to the repository .cursorignore.
@@ -22,13 +24,19 @@
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/bootstrap.sh"
-[ "$#" -ge 1 ] || bootstrap_error 'usage: bootstrap repo create <name> [--support=nginx]'
+[ "$#" -ge 1 ] || bootstrap_error 'usage: bootstrap repo create <name> [--copy-rules] [--support=nginx]'
 name=$1
 shift
 bootstrap_name "$name"
 nginx=0
+rules_mode=link
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --copy-rules)
+            rules_mode=copy
+            shift
+            continue
+            ;;
         --support)
             [ "$#" -ge 2 ] || bootstrap_error 'missing value for --support'
             support=$2
@@ -103,25 +111,25 @@ if [ "$nginx" = 1 ]; then
 fi
 for rule in "$rules_dir"/.cursor/rules/*.mdc; do
     [ -f "$rule" ] || continue
-    bootstrap_link_missing "$rule" "$path/.cursor/rules/${rule##*/}"
+    bootstrap_install_missing "$rule" "$path/.cursor/rules/${rule##*/}" "$rules_mode"
 done
 for rule in "$rules_dir"/.claude/rules/*.md; do
     [ -f "$rule" ] || continue
-    bootstrap_link_missing "$rule" "$path/.claude/rules/${rule##*/}"
+    bootstrap_install_missing "$rule" "$path/.claude/rules/${rule##*/}" "$rules_mode"
 done
-bootstrap_link_missing "$rules_dir/CLAUDE.md" "$path/CLAUDE.md"
-bootstrap_link_missing "$rules_dir/CODEX.md" "$path/CODEX.md"
+bootstrap_install_missing "$rules_dir/CLAUDE.md" "$path/CLAUDE.md" "$rules_mode"
+bootstrap_install_missing "$rules_dir/CODEX.md" "$path/CODEX.md" "$rules_mode"
 for codex in "$rules_dir"/*/CODEX.md; do
     [ -f "$codex" ] || continue
     dir=${codex%/CODEX.md}
     dir=${dir##*/}
     [ -d "$path/$dir" ] || continue
-    bootstrap_link_missing "$codex" "$path/$dir/CODEX.md"
+    bootstrap_install_missing "$codex" "$path/$dir/CODEX.md" "$rules_mode"
 done
-bootstrap_link_missing "$rules_dir/.cursorignore" "$path/.cursorignore"
-bootstrap_link_missing "$cursor_rules" "$path/.cursorrules"
+bootstrap_install_missing "$rules_dir/.cursorignore" "$path/.cursorignore" "$rules_mode"
+bootstrap_install_missing "$cursor_rules" "$path/.cursorrules" "$rules_mode"
 for skill in "$rules_dir"/.cursor/skills/*; do
     [ -d "$skill" ] && [ -f "$skill/SKILL.md" ] || continue
-    bootstrap_link_missing "$skill" "$path/.cursor/skills/${skill##*/}"
+    bootstrap_install_missing "$skill" "$path/.cursor/skills/${skill##*/}"
 done
 bootstrap_register "$name" "$path"

@@ -1,12 +1,14 @@
 #!/bin/sh
 ##<help>
 ## import - Register and select an existing repository and discover its service ports.
-## Usage: bootstrap repo import <path>
+## Usage: bootstrap repo import <path> [--copy-rules]
 ## Accept absolute or relative paths, including . and ..; store and print the absolute path.
 ## Require a services directory; use the canonical directory basename as the name.
 ## Preserve repository files and reuse existing port domains and reservations.
 ## Add missing CLAUDE.md, CODEX.md, .cursorignore, .cursorrules, Claude rule and Cursor rule/skill
 ## links from ~/.s6craft. Link each ~/.s6craft/<dir>/CODEX.md when the repository has <dir>.
+## --copy-rules copies rule files, including scoped CODEX.md, .cursorrules and .cursorignore.
+## Copies can be edited locally; existing files/links are preserved and skills remain linked.
 ## Add project_doc_fallback_filenames = ["CODEX.md"] to ${CODEX_HOME:-~/.codex}/config.toml if missing.
 ## Require the same shared rules as repo create. Never replace existing files or links.
 ## Re-import to pick up new shared rules and skills. Cursor and Claude parent directories must be
@@ -18,13 +20,26 @@
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/bootstrap.sh"
-if [ "$#" -ne 1 ]; then
-    bootstrap_error 'usage: bootstrap repo import <path>'
+if [ "$#" -lt 1 ]; then
+    bootstrap_error 'usage: bootstrap repo import <path> [--copy-rules]'
 fi
 if [ ! -d "$1" ]; then
     bootstrap_error "repo directory does not exist: $1"
 fi
 path=$(CDPATH= cd -- "$1" && pwd -P)
+shift
+rules_mode=link
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --copy-rules)
+            rules_mode=copy
+            shift
+            ;;
+        *)
+            bootstrap_error "unknown option: $1"
+            ;;
+    esac
+done
 if [ "$path" != "$(printf '%s' "$path" | tr '\t\n' '  ')" ]; then
     bootstrap_error 'repo paths cannot contain tabs or newlines'
 fi
@@ -71,25 +86,25 @@ bootstrap_codex_config
 mkdir -p -- "$path/.cursor/rules" "$path/.cursor/skills" "$path/.claude/rules"
 for rule in "$rules_dir"/.cursor/rules/*.mdc; do
     [ -f "$rule" ] || continue
-    bootstrap_link_missing "$rule" "$path/.cursor/rules/${rule##*/}"
+    bootstrap_install_missing "$rule" "$path/.cursor/rules/${rule##*/}" "$rules_mode"
 done
 for rule in "$rules_dir"/.claude/rules/*.md; do
     [ -f "$rule" ] || continue
-    bootstrap_link_missing "$rule" "$path/.claude/rules/${rule##*/}"
+    bootstrap_install_missing "$rule" "$path/.claude/rules/${rule##*/}" "$rules_mode"
 done
-bootstrap_link_missing "$rules_dir/CLAUDE.md" "$path/CLAUDE.md"
-bootstrap_link_missing "$rules_dir/CODEX.md" "$path/CODEX.md"
+bootstrap_install_missing "$rules_dir/CLAUDE.md" "$path/CLAUDE.md" "$rules_mode"
+bootstrap_install_missing "$rules_dir/CODEX.md" "$path/CODEX.md" "$rules_mode"
 for codex in "$rules_dir"/*/CODEX.md; do
     [ -f "$codex" ] || continue
     dir=${codex%/CODEX.md}
     dir=${dir##*/}
     [ -d "$path/$dir" ] || continue
-    bootstrap_link_missing "$codex" "$path/$dir/CODEX.md"
+    bootstrap_install_missing "$codex" "$path/$dir/CODEX.md" "$rules_mode"
 done
-bootstrap_link_missing "$rules_dir/.cursorignore" "$path/.cursorignore"
-bootstrap_link_missing "$rules_dir/.cursorrules" "$path/.cursorrules"
+bootstrap_install_missing "$rules_dir/.cursorignore" "$path/.cursorignore" "$rules_mode"
+bootstrap_install_missing "$rules_dir/.cursorrules" "$path/.cursorrules" "$rules_mode"
 for skill in "$rules_dir"/.cursor/skills/*; do
     [ -d "$skill" ] && [ -f "$skill/SKILL.md" ] || continue
-    bootstrap_link_missing "$skill" "$path/.cursor/skills/${skill##*/}"
+    bootstrap_install_missing "$skill" "$path/.cursor/skills/${skill##*/}"
 done
 bootstrap_register "$name" "$path"
