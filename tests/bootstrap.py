@@ -1,4 +1,4 @@
-"""Isolated repository import checks, including existing ports and concurrent imports."""
+"""Isolated repository create/import checks, including rules, ports and concurrency."""
 import concurrent.futures
 import json
 import os
@@ -212,9 +212,64 @@ with tempfile.TemporaryDirectory() as tmp:
         results = list(pool.map(lambda _: call('bootstrap', 'repo', 'import', str(race)), range(2)))
     assert results == [str(race), str(race)]
     assert len([r for r in records() if r['port'] == 9500]) == 1
+    # Copy mode dereferences source links and keeps every rule independently editable.
+    (shared/'.cursor/rules/alias.mdc').symlink_to(shared/'.cursor/rules/general.mdc')
+    copied = repo('copied')
+    (copied/'ui').mkdir()
+    (copied/'db').mkdir()
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(lambda _: call('bootstrap', 'repo', 'import', str(copied),
+                                              '--copy-rules'), range(2)))
+    assert results == [str(copied), str(copied)]
+    created = root/'created-copy'
+    assert call('bootstrap', 'repo', 'create', created.name, '--copy-rules',
+                '--support=nginx', cwd=root) == str(created)
+    assert (created/'Makefile').is_file()
+    rule_paths = ['CLAUDE.md', 'CODEX.md', 'ui/CODEX.md', 'db/CODEX.md',
+                  '.cursorignore', '.cursorrules', '.claude/rules/general.md',
+                  '.cursor/rules/general.mdc', '.cursor/rules/new.mdc',
+                  '.cursor/rules/alias.mdc']
+    for path in (copied, created):
+        for relative in rule_paths:
+            target = path/relative
+            assert target.is_file() and not target.is_symlink(), target
+            assert target.read_bytes() == (shared/relative).read_bytes()
+            original = (shared/relative).read_bytes()
+            target.write_text('local customization\n')
+            assert (shared/relative).read_bytes() == original
+        assert (path/'.cursor/skills/example').is_symlink()
+        call('bootstrap', 'repo', 'import', str(path), '--copy-rules')
+        call('bootstrap', 'repo', 'import', str(path))
+        for relative in rule_paths:
+            assert (path/relative).read_text() == 'local customization\n'
+
+    # Copy mode also preserves existing links, including dangling links.
+    call('bootstrap', 'repo', 'import', str(existing), '--copy-rules')
+    assert (existing/'CODEX.md').is_symlink()
+    assert (existing/'.cursorrules').readlink() == root/'missing-rules'
+    assert (existing/'CLAUDE.md').read_text() == 'local instructions\n'
+    linked = root/'created-link'
+    call('bootstrap', 'repo', 'create', linked.name, cwd=root)
+    for relative in rule_paths:
+        assert (linked/relative).is_symlink()
+
+    # Invalid options and missing sources must fail before creating any repo state.
+    before = index.read_bytes()
+    call('bootstrap', 'repo', 'create', 'invalid-copy', '--copy-rules=bad', cwd=root, ok=False)
+    assert not (root/'invalid-copy').exists()
+    call('bootstrap', 'repo', 'import', str(copied), '--copy-rules=bad', ok=False)
+    (shared/'CODEX.md').unlink()
+    call('bootstrap', 'repo', 'create', 'missing-copy', '--copy-rules', cwd=root, ok=False)
+    call('bootstrap', 'repo', 'import', str(copied), '--copy-rules', ok=False)
+    assert not (root/'missing-copy').exists()
+    assert index.read_bytes() == before
+    (shared/'CODEX.md').write_text('shared codex\n')
+    print('bootstrap copy-rules checks passed', flush=True)
+
     call('bootstrap', 'repo', 'rm', 'race')
     assert race.exists()
     call('bootstrap', 'repo', 'import', '--help')
     call('port', 'allocate', 'discover', '--help')
 
-print('bootstrap import checks passed')
+
+print('bootstrap repository checks passed')
