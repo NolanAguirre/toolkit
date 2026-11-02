@@ -5,6 +5,23 @@
 export STATE_PATH GSTATE_PATH
 set -e
 . "$(dirname "$0")/../lib/locking.sh"
+case "$1" in
+    "$(dirname "$0")/rules/copy")
+        if [ "$#" -gt 2 ]; then
+            echo 'error: usage: bootstrap rules copy [path]' >&2
+            exit 1
+        fi
+        path=${2:-.}
+        if [ ! -d "$path" ]; then
+            echo "error: directory does not exist: $path" >&2
+            exit 1
+        fi
+        # Lock the existing directory without creating toolkit state or lock files.
+        exec 9<"$path"
+        flock -x 9
+        exec "$@"
+        ;;
+esac
 : "${STATE_PATH:?STATE_PATH is not set}"
 export STATE_DIR="$STATE_PATH/bootstrap"
 [ -f "$STATE_DIR/lock" ] && [ -d "$STATE_DIR/repos" ] && [ -f "$STATE_DIR/current_repo" ] || {

@@ -1,0 +1,52 @@
+#!/bin/sh
+##<help>
+## copy - Copy shared rules into an existing project for local editing.
+## Usage: bootstrap rules copy [path]
+## Default to the current directory. Print the absolute project path.
+## Copy CLAUDE.md, CODEX.md, .cursorignore, .cursorrules and Cursor/Claude rules from ~/.s6craft.
+## Copy scoped CODEX.md only into existing real project directories.
+## Preserve existing files and links. Rule parent directories must be real directories.
+## Create only missing .cursor/rules and .claude/rules directories; do not install skills.
+## No toolkit setup, repo registration, ports, Makefiles or service folders are needed or created.
+##</help>
+set -e
+. "$(dirname "$0")/../../lib/bootstrap.sh"
+[ "$#" -le 1 ] || bootstrap_error 'usage: bootstrap rules copy [path]'
+path=$(CDPATH= cd -- "${1:-.}" && pwd -P)
+rules_dir="$HOME/.s6craft"
+if [ ! -d "$rules_dir/.cursor/rules" ] || [ ! -d "$rules_dir/.claude/rules" ] || [ ! -f "$rules_dir/CLAUDE.md" ] || [ ! -f "$rules_dir/CODEX.md" ] || [ ! -f "$rules_dir/.cursorignore" ] || [ ! -f "$rules_dir/.cursorrules" ]; then
+    bootstrap_error "missing shared rules in $rules_dir"
+fi
+if [ -L "$path/.cursor" ] || { [ -e "$path/.cursor" ] && [ ! -d "$path/.cursor" ]; }; then
+    bootstrap_error '.cursor must be a real directory'
+fi
+if [ -L "$path/.cursor/rules" ] || { [ -e "$path/.cursor/rules" ] && [ ! -d "$path/.cursor/rules" ]; }; then
+    bootstrap_error '.cursor/rules must be a real directory'
+fi
+if [ -L "$path/.claude" ] || { [ -e "$path/.claude" ] && [ ! -d "$path/.claude" ]; }; then
+    bootstrap_error '.claude must be a real directory'
+fi
+if [ -L "$path/.claude/rules" ] || { [ -e "$path/.claude/rules" ] && [ ! -d "$path/.claude/rules" ]; }; then
+    bootstrap_error '.claude/rules must be a real directory'
+fi
+mkdir -p -- "$path/.cursor/rules" "$path/.claude/rules"
+for rule in "$rules_dir"/.cursor/rules/*.mdc; do
+    [ -f "$rule" ] || continue
+    bootstrap_install_missing "$rule" "$path/.cursor/rules/${rule##*/}" copy
+done
+for rule in "$rules_dir"/.claude/rules/*.md; do
+    [ -f "$rule" ] || continue
+    bootstrap_install_missing "$rule" "$path/.claude/rules/${rule##*/}" copy
+done
+bootstrap_install_missing "$rules_dir/CLAUDE.md" "$path/CLAUDE.md" copy
+bootstrap_install_missing "$rules_dir/CODEX.md" "$path/CODEX.md" copy
+for codex in "$rules_dir"/*/CODEX.md; do
+    [ -f "$codex" ] || continue
+    dir=${codex%/CODEX.md}
+    dir=${dir##*/}
+    [ -d "$path/$dir" ] && [ ! -L "$path/$dir" ] || continue
+    bootstrap_install_missing "$codex" "$path/$dir/CODEX.md" copy
+done
+bootstrap_install_missing "$rules_dir/.cursorignore" "$path/.cursorignore" copy
+bootstrap_install_missing "$rules_dir/.cursorrules" "$path/.cursorrules" copy
+printf '%s\n' "$path"
