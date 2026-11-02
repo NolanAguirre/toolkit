@@ -38,8 +38,9 @@ work=$(mktemp -d)
 upload=
 # Keep the remote path known even if SSH loses the upload's final response.
 trap 'status=$?; trap - 0; if [ -n "$upload" ]; then
-    if ! ssh -T "$@" "$REMOTE_TARGET" "rm -rf -- '\''$upload'\''" </dev/null; then
+    if ! ssh -T "$@" "$REMOTE_TARGET" "rm -rf -- '\''$upload'\'' && test ! -e '\''$source_stage'\''" </dev/null; then
         printf "error: could not confirm cleanup on %s; remaining upload may be at %s\n" "$REMOTE_TARGET" "$upload" >&2
+        printf "error: root source staging may remain at %s; inspect it with sudo\n" "$source_stage" >&2
         status=1
     fi
 fi
@@ -123,7 +124,9 @@ fi
 mkdir -p /usr/local/src/toolkit
 chown "root:$(id -gn root)" /usr/local/src/toolkit
 chmod 755 /usr/local/src/toolkit
-stage=$(mktemp -d /usr/local/src/toolkit/.install.XXXXXX)
+next_stage="/usr/local/src/toolkit/.install.${upload##*/}"
+mkdir -m 700 "$next_stage"
+stage=$next_stage
 # Extract a private copy, so the upload cannot change underneath setup/build.
 cp "$upload/source.tar.gz" "$stage/source.tar.gz"
 mkdir "$stage/src"
@@ -161,6 +164,7 @@ case "$token" in
         ;;
 esac
 upload="/tmp/toolkit-upload.$token"
+source_stage="/usr/local/src/toolkit/.install.${upload##*/}"
 upload_command="upload='$upload'
 $(cat <<'UPLOAD'
 set -e

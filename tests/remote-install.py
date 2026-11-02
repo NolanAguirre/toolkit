@@ -20,7 +20,7 @@ SRC = Path(__file__).resolve().parents[1] / 'src'
 
 # This program runs as the mock ssh, sudo and privileged host utilities.
 MOCK = r'''#!/usr/bin/env python3
-import fcntl, json, os, pathlib, re, subprocess, sys, time
+import fcntl, json, os, pathlib, re, shlex, subprocess, sys, time
 root = pathlib.Path(os.environ['MOCK_HOST'])
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
@@ -33,7 +33,7 @@ def log(kind, **fields):
 def redirect(text):
     # Protect paths already redirected by the mock, including the stage argument.
     text = text.replace(str(root), '@@HOST@@')
-    text = re.sub(r'/usr/local|/var/lib/s6craft-tools|/etc/sudoers.d|/run/toolkit-remote|/tmp/toolkit-upload',
+    text = re.sub(r'(?<!@@HOST@@)(?:/usr/local|/var/lib/s6craft-tools|/etc/sudoers.d|/run/toolkit-remote|/tmp/toolkit-upload)',
                   lambda m: '@@HOST@@' + m[0], text)
     text = text.replace('@@HOST@@', str(root))
     # Root scripts may reset PATH. Keep privileged utility mocks in that PATH.
@@ -57,7 +57,7 @@ if name == 'ssh':
     assert option('-l') == 'deployer' and option('-p') == '2222', args
     assert option('-i') == os.environ['MOCK_IDENTITY'], args
     assert 'IdentitiesOnly=yes' in ssh_options, args
-    phase = 'install' if '-tt' in options else ('cleanup' if re.search(r'\brm\b', command) else 'upload')
+    phase = 'install' if '-tt' in options else ('cleanup' if command.lstrip().startswith('rm ') else 'upload')
     log('ssh', phase=phase, args=args)
     assert 's6-sudo' not in command and 'toolkit-remote/run' not in command, command
     env = dict(os.environ, PATH=os.environ['MOCK_HOST_PATH'],
@@ -78,8 +78,8 @@ if name == 'ssh':
             (root/('uploaded-' + str(os.getpid()))).touch()
         sys.exit(result.returncode)
     if phase == 'install':
-        for script in (root/'tmp').glob('toolkit-upload.*/install.sh'):
-            script.write_text(redirect(script.read_text()))
+        script = pathlib.Path(shlex.split(redirect(command))[2])
+        script.write_text(redirect(script.read_text()))
     elif os.environ.get('FAIL_CLEANUP'):
         sys.exit(255)
     sys.exit(subprocess.run(['sh', '-c', redirect(command)], env=env).returncode)
@@ -181,6 +181,8 @@ class RemoteInstall(unittest.TestCase):
                         MOCK_IDENTITY=str(self.identity), MOCK_REAL_FLOCK=shutil.which('flock') or '',
                         MOCK_HOST_PATH=str(self.mocks) + ':/usr/bin:/bin',
                         PATH=str(self.local_mocks) + ':/usr/bin:/bin')
+        for name in ('TOOLKIT_BIN_PATH', 'TOOLKIT_SRC_PATH', 'GLOBAL_STATE_DIR'):
+            self.env.pop(name, None)
         # Source choice must come from configuration, not the invoking command's tree.
         (self.source/'source-choice').write_text('configured source\n')
         (self.client/'source-choice').write_text('wrong source\n')
@@ -227,6 +229,7 @@ class RemoteInstall(unittest.TestCase):
 
     def assert_clean(self):
         self.assertEqual(list((self.host/'tmp').glob('toolkit-upload.*')), [])
+        self.assertEqual(list((self.host/'usr/local/src/toolkit').glob('.install.*')), [])
         self.assertFalse(self.events('forbidden'))
 
     def assert_transport(self, phases):
@@ -341,7 +344,7 @@ class RemoteInstall(unittest.TestCase):
         self.install(ok=False, extra={'MOCK_HOST_PATH': str(missing)})
         self.assertFalse((self.bin/'remote').exists())
         self.assertFalse(self.events('probe'))
-        self.assert_transport(['upload', 'install', 'cleanup'])
+        self.assert_transport(['upload', 'cleanup'])
 
     def test_interrupted_upload_is_clean_and_does_not_run_sudo(self):
         self.install(ok=False, extra={'FAIL_UPLOAD': '1'})
@@ -374,6 +377,14 @@ class RemoteInstall(unittest.TestCase):
         self.install(ok=False, extra={'FAIL_BUILD': '1', 'FAIL_CLEANUP': '1'})
         self.assertEqual([event['phase'] for event in self.events('ssh')],
                          ['upload', 'install', 'cleanup'])
+
+    def test_lost_cleanup_reports_the_remaining_upload(self):
+        result = self.install(ok=False, extra={'FAIL_SUDO': '1', 'FAIL_CLEANUP': '1'})
+        remaining = list((self.host/'tmp').glob('toolkit-upload.*'))
+        self.assertEqual(len(remaining), 1)
+        self.assertIn('/tmp/' + remaining[0].name, result.stderr)
+        self.assertIn('/usr/local/src/toolkit/.install.' + remaining[0].name, result.stderr)
+        self.assertFalse(self.managed.exists())
 
     def start_install(self, extra=None):
         process = subprocess.Popen(['sh', str(self.client/'remote'), 'host', 'install-toolkit', 'fixture'],
