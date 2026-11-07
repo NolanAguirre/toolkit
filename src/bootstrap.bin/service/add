@@ -23,6 +23,7 @@
 ## Existing service paths are rejected.
 ## http: allocate a stable services/<name> port in the current directory's domain;
 ## write env-dir/default/PORT and HOST (localhost). The port domain must exist.
+## Node.js services with http support also install express, including node-ml.
 ## fs: write env-dir/default/WRITE_DIR as the expanded $HOME/.<name> path.
 ## db: read the same-name database registration under the current repository's bootstrap state.
 ## PostgreSQL writes DATABASE_URL; SQLite expands the registered repo-relative path into DB_FILE.
@@ -32,7 +33,7 @@
 ## Passwords belong outside bootstrap state; generated PostgreSQL connections are password-free.
 ## Create the matching database scaffold first with bootstrap db add <name> --support=<backend>.
 ## No database connection, migrations, database port allocation or .env file creation.
-## Requires npm; creates no application code or dependencies beyond the python stubs and auth service.
+## Requires npm; creates no application code beyond the python stubs and auth service.
 ## Print the service path.
 ## Failed scaffolding is cleaned up; a reserved port is retained if publishing fails.
 ##</help>
@@ -251,6 +252,9 @@ if [ "$python" = 1 ]; then
     printf '%s\n' "${GPU_LOCK_PATH:-/tmp/gpu.lock}" > "$pending/$name/env-dir/default/GPU_LOCK_PATH"
 fi
 (cd -- "$pending/$name" && npm init -y && npm pkg set 'scripts.start=node index.js') >&2
+if [ "$type" = nodejs ] && [ "$http" = 1 ]; then
+    (cd -- "$pending/$name" && npm install express) >&2
+fi
 template=$(dirname "$0")/../template
 makefile=nodejs
 if [ "$type" = auth ]; then
