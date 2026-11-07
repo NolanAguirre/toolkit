@@ -1,4 +1,6 @@
 const http = require('node:http')
+const { readFileSync } = require('node:fs')
+const path = require('node:path')
 const { Pool } = require('pg')
 
 const host = process.env.HOST || '127.0.0.1'
@@ -42,7 +44,25 @@ const readCredentials = async (req) => {
   return body
 }
 
+const serveAsset = (filename, contentType) => {
+  const body = readFileSync(path.join(__dirname, 'public', filename))
+  return (_req, res) => {
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'same-origin',
+      'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    })
+    res.end(body)
+  }
+}
+
 const routes = {
+  'GET /auth/signup': serveAsset('signup.html', 'text/html; charset=utf-8'),
+  'GET /auth/signin': serveAsset('signin.html', 'text/html; charset=utf-8'),
+  'GET /auth/auth.css': serveAsset('auth.css', 'text/css; charset=utf-8'),
+  'GET /auth/auth.js': serveAsset('auth.js', 'text/javascript; charset=utf-8'),
   'GET /auth/health': (_req, res) => {
     sendJson(res, 200, { ok: true, service: 'auth' })
   },

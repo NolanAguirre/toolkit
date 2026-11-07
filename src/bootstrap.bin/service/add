@@ -9,6 +9,7 @@
 ## postgres database <name> whose sqitch.plan holds only the untouched v1.000.0 template.
 ## Writes db/<name>/deploy/v1.000.0.sql (auth schema, register/authenticate with pgcrypto),
 ## index.js with npm install pg, HOST=127.0.0.1 and services/openresty/routes/<name>.conf.
+## Includes signup and signin pages at /auth/signup and /auth/signin with public assets.
 ## Options accept =value or a separate value. --support may be repeated.
 ## Run npm init -y and create env-dir/default and env-dir/$USER with matching values.
 ## Include a simple Makefile with help, install, build and background start targets.
@@ -254,6 +255,8 @@ template=$(dirname "$0")/../template
 makefile=nodejs
 if [ "$type" = auth ]; then
     cp -- "$template/auth/index.js" "$pending/$name/index.js"
+    mkdir -p -- "$pending/$name/public"
+    cp -- "$template/auth/public/signup.html" "$template/auth/public/signin.html" "$template/auth/public/auth.css" "$template/auth/public/auth.js" "$pending/$name/public/"
     (cd -- "$pending/$name" && npm install pg) >&2
 fi
 if [ "$python" = 1 ]; then
