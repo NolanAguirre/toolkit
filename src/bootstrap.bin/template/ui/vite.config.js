@@ -7,6 +7,7 @@ const env = (name) => process.env[name] || readFileSync(new URL(`./env-dir/defau
 
 export default defineConfig({
   base: '/__NAME__/',
+  clearScreen: false,
   plugins: [react()],
   server: { host: env('HOST'), port: Number(env('PORT')), strictPort: true },
 })
