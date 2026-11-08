@@ -12,13 +12,14 @@ remote_token() {
     esac
 }
 
-# Copy one envdir layer as data; never evaluate its values as shell code.
+# Fill missing keys from an envdir as data; never evaluate values as shell code.
 remote_copy_env() (
     [ -e "$1" ] || [ -L "$1" ] || exit 0
     [ -d "$1" ] && [ ! -L "$1" ] || remote_error "expected a real environment directory: $1"
     for file in "$1"/* "$1"/.[!.]* "$1"/..?*; do
         [ -e "$file" ] || [ -L "$file" ] || continue
         key=${file##*/}
+        [ ! -e "$2/$key" ] || continue
         case "$key" in
             ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*)
                 remote_error "invalid environment key: $key"

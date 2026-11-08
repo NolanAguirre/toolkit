@@ -13,7 +13,7 @@
 ## Record archive SHA-256 and Git provenance beside the service run file.
 ## A service artifact may include .toolkit-commit containing its full build commit.
 ## Otherwise record the registered checkout's HEAD at deploy time, not a proven build commit.
-## Load services/<folder>/env-dir/default, then env-dir/production from the registered checkout.
+## Load services/<folder>/env-dir/production first; use env-dir/default for missing keys.
 ## Keep env files out of code artifacts; deployment transfers a private environment snapshot.
 ## WRITE_DIR defaults to the service data directory; a custom directory must belong to its runner.
 ##</help>
@@ -54,11 +54,11 @@ while IFS= read -r entry; do
     env_source="$env_source/env-dir"
     environment="$upload/$service.env"
     mkdir "$environment"
-    # Explicit layers: production replaces defaults; no personal env directories are read.
+    # Production wins, including empty values; defaults fill only missing keys.
     if [ -e "$env_source" ] || [ -L "$env_source" ]; then
         [ -d "$env_source" ] && [ ! -L "$env_source" ] || remote_error "expected a real env-dir: $env_source"
-        remote_copy_env "$env_source/default" "$environment"
         remote_copy_env "$env_source/production" "$environment"
+        remote_copy_env "$env_source/default" "$environment"
     fi
     # A multi-process source may assign PORT from a different key, or have no listener.
     if [ "${entry##*:}" = - ]; then
