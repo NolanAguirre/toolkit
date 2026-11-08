@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Docs from './Docs.jsx'
 
 let DevTools = ({ children }) => children
 let DevScope = ({ children }) => children
@@ -225,6 +226,7 @@ function DeploymentView({ data, repo, busy, setBusy }) {
   }
   return <DevScope id="r9t3y7u" state={{ repo: repo.name, checking, deploying, live: live?.error ? 'error' : live ? 'checked' : 'idle' }}><section className="panel">
     <div className="panel-heading"><div><h2>Deployments</h2><p>Running services, release identities, and local packages</p></div><button onClick={checkHost} disabled={busy || checking || !targetReady}>{checking ? 'Checking host…' : 'Check host via SSH'}</button></div>
+    <p className="deployment-guide-link"><a href="#docs/deployments" onClick={event => { if (busy) event.preventDefault() }} aria-disabled={busy}>How deployments work →</a></p>
     <div className="deployment-summary"><div><span className="eyebrow">REMOTE TARGET</span><p>{target ? `${target.user ? `${target.user}@` : ''}${target.host}${target.port ? ` · port ${target.port}` : ''}` : 'No registered target'}</p></div><div><span className="eyebrow">LIVE STATUS</span><p>{checking ? 'Checking…' : live?.error ? 'Check failed' : live ? 'Checked' : 'Not checked'}</p></div></div>
     <form className="deploy-form" onSubmit={saveTarget} onChange={() => { setTargetChanged(true); setTargetNotice('') }} aria-label="Deployment target">
       <h3>Deployment target</h3>
@@ -288,6 +290,7 @@ function DeploymentView({ data, repo, busy, setBusy }) {
 }
 
 export default function App() {
+  const [section, setSection] = useState(() => window.location.hash.startsWith('#docs') ? 'docs' : 'workspace')
   const [repos, setRepos] = useState([])
   const [selected, setSelected] = useState('')
   const [parentPath, setParentPath] = useState('')
@@ -302,6 +305,12 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [revision, setRevision] = useState(0)
   const [dark, setDark] = useState(initialDark)
+
+  useEffect(() => {
+    const changeSection = () => setSection(window.location.hash.startsWith('#docs') ? 'docs' : 'workspace')
+    window.addEventListener('hashchange', changeSection)
+    return () => window.removeEventListener('hashchange', changeSection)
+  }, [])
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light'
@@ -338,7 +347,7 @@ export default function App() {
   useEffect(() => {
     setDetail(null)
     setDeployment(null)
-    if (!selected) return
+    if (!selected || section === 'docs') return
     const controller = new AbortController()
     const base = `/api/repos/${encodeURIComponent(selected)}`
     const endpoint = view === 'deployments' ? `${base}/deployments` : base
@@ -347,7 +356,7 @@ export default function App() {
       else setDetail(data)
     }).catch(failure => { if (!controller.signal.aborted) setError(failure.message) })
     return () => controller.abort()
-  }, [selected, revision, view])
+  }, [selected, revision, view, section])
 
   async function completed(resultPath, kind) {
     setForm(null)
@@ -385,9 +394,13 @@ export default function App() {
   const createForm = form && <CreateForm key={`${form}-${selected}`} kind={form} repo={repo} parentPath={parentPath} serviceTypes={serviceTypes} busy={busy} setBusy={setBusy} onComplete={completed} onClose={() => setForm(null)} />
   return <DevTools><DevScope id="k7m3p9w" state={{ selected, view, form: form || undefined, busy, loading }}><main>
     <DevScope id="q2n8r4t"><header><a className="brand" href="/dashboard/">s6<span>s6craft</span></a><div className="header-actions"><span className="local">Local workspace</span><DevScope id="m6d2k8n" state={{ dark }}><button type="button" className="theme-toggle" aria-pressed={dark} onClick={toggleDark}>Dark mode</button></DevScope></div></header></DevScope>
-    {notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
-    {error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
-    <div className="workspace">
+    <nav className="section-nav" aria-label="Toolkit sections">
+      <a href="#workspace" aria-current={section === 'workspace' ? 'page' : undefined} aria-disabled={busy} onClick={event => { if (busy) event.preventDefault() }}>Workspace</a>
+      <a href="#docs/deployments" aria-current={section === 'docs' ? 'page' : undefined} aria-disabled={busy} onClick={event => { if (busy) event.preventDefault() }}>Docs</a>
+    </nav>
+    {section === 'workspace' && notice && <DevScope id="j9w4e8y"><p className="success" role="status">{notice}</p></DevScope>}
+    {section === 'workspace' && error && <DevScope id="u3i7o1a"><p className="error" role="alert">{error}</p></DevScope>}
+    {section === 'docs' ? <DevScope id="d7o2c9s"><Docs /></DevScope> : <div className="workspace">
       <DevScope id="z8x3c7v" state={{ count: repos.length, selected }}><aside className="panel repo-list" aria-label="Repositories"><div className="panel-heading"><h2>Repositories <span className="count">{repos.length}</span></h2><button disabled={busy || loading} onClick={() => refresh()} aria-label="Refresh repositories">↻</button></div><div className="repo-actions"><button disabled={busy || loading} onClick={() => setForm('import')}>Import repo</button><button className="primary" disabled={busy || loading} onClick={() => setForm('create')}>+ New repo</button></div>
         {(form === 'create' || form === 'import') && createForm}
         {loading && <p className="empty">Refreshing…</p>}
@@ -401,7 +414,7 @@ export default function App() {
           {view === 'resources' ? detail ? <div className="resource-stack"><ResourceList devId="t4y8u2i" title="Services" kind="services" items={detail.services} onAdd={setForm} onDelete={deleteService} busy={busy}>{form === 'services' && createForm}</ResourceList><ResourceList devId="n4p7q2w" title="UIs" kind="uis" items={detail.uis} onAdd={setForm} busy={busy}>{form === 'uis' && createForm}</ResourceList><ResourceList devId="h8j3k6m" title="Databases" kind="databases" items={detail.databases} onAdd={setForm} busy={busy}>{form === 'databases' && createForm}</ResourceList></div> : <p className="empty">{error ? 'Could not load this repository.' : 'Loading repository…'}</p> : deployment ? <DeploymentView key={selected} data={deployment} repo={repo} busy={busy} setBusy={setBusy} /> : <p className="empty">{error ? 'Could not load deployment details.' : 'Loading deployments…'}</p>}
         </> : <section className="panel empty">Select a repository to view its services, UIs, and deployments.</section>}
       </div></DevScope>
-    </div>
+    </div>}
     <DevScope id="e3r7t1y"><footer>s6craft dashboard <span>Powered by the s6craft CLI</span></footer></DevScope>
   </main></DevScope></DevTools>
 }

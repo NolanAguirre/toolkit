@@ -7,6 +7,7 @@ const library = realpathSync(fileURLToPath(new URL('../../../visual-prompter/com
 const source = realpathSync(`${library}/src`)
 
 const entry = [
+  `export { default as Card, CardHeader, CardSection } from ${JSON.stringify(`${source}/components/Card/card.jsx`)}`,
   `export { default as DevInspector, DevScope } from ${JSON.stringify(`${source}/components/DevInspector/devInspector.jsx`)}`,
   `export { default as Badge } from ${JSON.stringify(`${source}/components/Badge/badge.jsx`)}`,
   `export { default as ScrollingText } from ${JSON.stringify(`${source}/components/ScrollingText/scrollingText.jsx`)}`,
