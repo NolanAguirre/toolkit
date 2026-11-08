@@ -88,6 +88,7 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     assert not (worker/'package.json').exists()
     assert list((worker/'env-dir/default').iterdir()) == []
     assert (worker/'env-dir/tester').is_dir()
+    assert list((worker/'env-dir/production').iterdir()) == []
     for name, backend, key, value in (
         ('goapi', 'postgres', 'DATABASE_URL', 'postgresql://postgres@localhost:5432/goapi'),
         ('golite', 'sqlite', 'DB_FILE', str(fresh/'db/golite/golite.sqlite')),
@@ -103,6 +104,8 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
         assert (defaults/'PORT').read_text().strip().isdigit()
         for file in defaults.iterdir():
             assert (service/'env-dir/tester'/file.name).read_bytes() == file.read_bytes()
+            expected = b'#default\n' if file.name == 'WRITE_DIR' else file.read_bytes()
+            assert (service/'env-dir/production'/file.name).read_bytes() == expected
     before = (worker/'main.go').read_bytes()
     call('bootstrap', 'service', 'add', 'worker', '--type=go', cwd=fresh, ok=False)
     assert (worker/'main.go').read_bytes() == before
@@ -121,6 +124,7 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     assert sorted(file.name for file in blank.iterdir()) == ['Makefile', 'env-dir']
     assert list((blank/'env-dir/default').iterdir()) == []
     assert (blank/'env-dir/tester').is_dir()
+    assert list((blank/'env-dir/production').iterdir()) == []
     subprocess.run(['make', 'install', 'build'], cwd=blank, env=env,
                    capture_output=True, text=True, check=True)
     start = subprocess.run(['make', 'start'], cwd=blank, env=env,
@@ -145,6 +149,8 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
         assert (defaults/'PORT').read_text().strip().isdigit()
         for file in defaults.iterdir():
             assert (service/'env-dir/tester'/file.name).read_bytes() == file.read_bytes()
+            expected = b'#default\n' if file.name == 'WRITE_DIR' else file.read_bytes()
+            assert (service/'env-dir/production'/file.name).read_bytes() == expected
 
     # Template values are literal, even with metacharacters and placeholder text.
     previous_home = env['HOME']
