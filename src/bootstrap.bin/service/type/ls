@@ -17,5 +17,6 @@ cat <<'TYPES'
 type	label	options	required	description
 nodejs	Node.js	http,fs,db	-	Creates the Node.js package and environment files. Add application code before starting it.
 node-ml	Node ML (Node.js + Python)	http,fs,db,python	python	Creates the Node.js package, Python consumer, filesystem queue helpers and environment files. Add application and ML code before starting it.
+go	Go	http,fs,db	-	Creates a Go module, runnable service and environment files. HTTP adds a /healthz endpoint using the standard library.
 auth	Auth (Node.js + PostgreSQL + OpenResty)	http,db	http,db	Creates the login service, auth migration and OpenResty routes. Run bootstrap openresty add and bootstrap db add <name> --support=postgres first.
 TYPES

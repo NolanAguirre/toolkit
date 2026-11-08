@@ -1,4 +1,4 @@
-"""Node/Python scaffolding and foreground launchers in disposable local state."""
+"""Service scaffolding and foreground launchers in disposable local state."""
 import os
 from pathlib import Path
 import shutil
@@ -30,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     configs = {row.split('\t')[0]: row.split('\t') for row in catalog[1:]}
     assert configs['nodejs'][2:4] == ['http,fs,db', '-']
     assert configs['node-ml'][2:4] == ['http,fs,db,python', 'python']
+    assert configs['go'][2:4] == ['http,fs,db', '-']
     call('bootstrap', 'service', 'type', 'ls', 'unexpected', ok=False)
     fresh = root/'fresh'
     (fresh/'services').mkdir(parents=True)
@@ -70,6 +71,48 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     call('bootstrap', 'service', 'add', 'tagger', '--type=nodejs', '--support=python', cwd=fresh, ok=False)
     assert (tagger/'remote-services').read_bytes() == before
     assert not list((fresh/'services').glob('.service.*'))
+
+    # Go uses its own toolchain and shares the existing environment support.
+    go = installed/'go'
+    go.write_text('#!/bin/sh\n[ "$1" = mod ] && [ "$2" = init ] || exit 1\n'
+                  'printf "module %s\\n" "$3" > go.mod\n')
+    go.chmod(0o755)
+    npm.write_text('#!/bin/sh\nexit 1\n')
+    call('bootstrap', 'service', 'add', 'worker', '--type=go', cwd=fresh)
+    worker = fresh/'services/worker'
+    assert (worker/'go.mod').read_text() == 'module worker\n'
+    assert (worker/'main.go').is_file()
+    assert (worker/'Makefile').is_file()
+    assert not (worker/'package.json').exists()
+    assert list((worker/'env-dir/default').iterdir()) == []
+    assert (worker/'env-dir/tester').is_dir()
+    for name, backend, key, value in (
+        ('goapi', 'postgres', 'DATABASE_URL', 'postgresql://postgres@localhost:5432/goapi'),
+        ('golite', 'sqlite', 'DB_FILE', str(fresh/'db/golite/golite.sqlite')),
+    ):
+        call('bootstrap', 'db', 'add', name, f'--support={backend}', cwd=fresh)
+        call('bootstrap', 'service', 'add', name, '--type=go', '--support=http',
+             '--support=fs', '--support=db', cwd=fresh)
+        service = fresh/'services'/name
+        defaults = service/'env-dir/default'
+        assert (defaults/key).read_text() == value + '\n'
+        assert (defaults/'WRITE_DIR').read_text() == str(root/'home'/f'.{name}') + '\n'
+        assert (defaults/'HOST').read_text() == 'localhost\n'
+        assert (defaults/'PORT').read_text().strip().isdigit()
+        for file in defaults.iterdir():
+            assert (service/'env-dir/tester'/file.name).read_bytes() == file.read_bytes()
+    before = (worker/'main.go').read_bytes()
+    call('bootstrap', 'service', 'add', 'worker', '--type=go', cwd=fresh, ok=False)
+    assert (worker/'main.go').read_bytes() == before
+    call('bootstrap', 'service', 'add', 'gopy', '--type=go', '--support=python', cwd=fresh, ok=False)
+    assert not (fresh/'services/gopy').exists()
+    call('bootstrap', 'service', 'add', 'missingdb', '--type=go', '--support=db', cwd=fresh, ok=False)
+    assert not (fresh/'services/missingdb').exists()
+    go.write_text('#!/bin/sh\ntouch go.mod\nexit 1\n')
+    call('bootstrap', 'service', 'add', 'failedgo', '--type=go', cwd=fresh, ok=False)
+    assert not (fresh/'services/failedgo').exists()
+    assert not list((fresh/'services').glob('.service.*'))
+    npm.write_text('#!/bin/sh\nexit 0\n')
 
     # Auth services need OpenResty, no nginx, and a fresh PostgreSQL database.
     template = src/'bootstrap.bin/template'

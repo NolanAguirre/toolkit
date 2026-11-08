@@ -185,7 +185,7 @@ class PrepareTests(unittest.TestCase):
     def test_dependencies_and_alias_install_only_expected_packages(self):
         expected = set('ca-certificates age openssh-server openssh-client s6 sudo util-linux '
                        'procps libc-bin coreutils findutils sed grep mawk passwd tar gzip curl '
-                       'git jq rsync nodejs npm python3 python3-venv python3-dev build-essential '
+                       'git jq rsync nodejs npm golang-go python3 python3-venv python3-dev build-essential '
                        'daemontools nginx'.split())
         for command in ('this/install-dependencies', 'host/bootstrap'):
             self.run_script('remote.bin/' + command)

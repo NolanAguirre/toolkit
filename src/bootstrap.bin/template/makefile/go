@@ -1,0 +1,18 @@
+.PHONY: install build start help
+
+help:
+	@echo "Available commands:"
+	@echo "  install   Download Go dependencies"
+	@echo "  build     Build bin/service"
+	@echo "  start     Build and start the service in the background"
+	@echo "  help      Show this help message"
+
+install:
+	go mod download
+
+build:
+	mkdir -p bin
+	go build -o bin/service .
+
+start: build
+	nohup envdir "./env-dir/$${ENV_USER:-$$USER}" ./bin/service >start.log 2>&1 </dev/null & echo "started in background, pid $$! (logs: start.log)"

@@ -4,7 +4,7 @@
 ## Usage: sudo remote this install-dependencies
 ## Standalone: sudo sh src/remote.bin/this/install-dependencies
 ## Run on the host being prepared; no toolkit state or registered repo is needed.
-## Install s6, Node/npm, Python/venv, native build tools, nginx, SSH and shell utilities.
+## Install s6, Node/npm, Go, Python/venv, native build tools, nginx, SSH and shell utilities.
 ## Safe to rerun: apt keeps installed packages and existing configuration.
 ## Application packages, model weights and NVIDIA drivers remain application/host setup.
 ## Does not initialize toolkit state or install the deployment runner.
@@ -72,6 +72,7 @@ apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
     rsync \
     nodejs \
     npm \
+    golang-go \
     python3 \
     python3-venv \
     python3-dev \

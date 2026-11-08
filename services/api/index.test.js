@@ -87,7 +87,9 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
 
   await t.test('service types enforce the Python scaffold for Node ML', async () => {
     const config = await (await get('/api/config')).json()
-    assert.deepEqual(Object.keys(config.serviceTypes), ['nodejs', 'node-ml', 'auth'])
+    assert.deepEqual(Object.keys(config.serviceTypes), ['nodejs', 'node-ml', 'go', 'auth'])
+    assert.deepEqual(config.serviceTypes.go.options, ['http', 'fs', 'db'])
+    assert.deepEqual(config.serviceTypes.go.required, [])
     assert.deepEqual(config.serviceTypes.nodejs.required, [])
     assert.deepEqual(config.serviceTypes['node-ml'].required, ['python'])
     assert.deepEqual(config.serviceTypes['node-ml'].options, ['http', 'fs', 'db', 'python'])
