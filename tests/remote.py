@@ -239,6 +239,7 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     repo = root/'demo'
     (repo/'services/api/env-dir/default').mkdir(parents=True)
     (repo/'services/api/env-dir/default/PORT').write_text('8001\n')
+    (repo/'services/api/env-dir/default/WRITE_DIR').write_text('#default\n')
     (repo/'services/dns').mkdir()
     (repo/'services/shared.js').write_text('// not a service\n')
     subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=env)
@@ -481,6 +482,8 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     assert (snapshot/'HOST').read_text() == 'production.example\n'
     assert (snapshot/'FALLBACK').read_text() == 'default-value\n'
     assert (snapshot/'WRITE_DIR').read_text() == str(api/'data') + '\n'
+    dns_snapshot = base('dns')/'releases'/f'{dns_metadata["release"]}.env'
+    assert (dns_snapshot/'WRITE_DIR').read_text() == str(base('dns')/'data') + '\n'
     assert snapshot.stat().st_mode & 0o777 == 0o750
     assert (snapshot/'HOST').stat().st_mode & 0o777 == 0o640
     assert not list(published.glob('*.env'))
@@ -528,21 +531,34 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     (api/'running-release').unlink()
     # Prepare a dedicated custom path, preserve data on repeats, and reject unsafe paths.
     write_dir = root/'custom data'
-    (override/'WRITE_DIR').write_text(str(write_dir) + '\n')
+    write_value = str(write_dir) + ' \t\n'
+    (override/'WRITE_DIR').write_text(write_value)
     remote('deploy', 'demo', 'api', str(release/'api'))
+    custom_snapshot = api/'releases'/f'{current.resolve().name}.env'
+    assert (custom_snapshot/'WRITE_DIR').read_text() == write_value
     owners = json.loads((host/'owners.json').read_text())
     assert owners[str(write_dir)] == 'demo-api'
     assert write_dir.stat().st_mode & 0o777 == 0o700
     (write_dir/'keep').write_text('persistent\n')
+    (write_dir/'keep').chmod(0o640)
+    owners[str(write_dir)] = 'root'
+    owners[str(write_dir/'keep')] = 'root'
+    (host/'owners.json').write_text(json.dumps(owners))
+    write_dir.chmod(0o755)
     remote('deploy', 'demo', 'api', str(release/'api'))
+    owners = json.loads((host/'owners.json').read_text())
+    assert owners[str(write_dir)] == 'demo-api'
+    assert write_dir.stat().st_mode & 0o777 == 0o700
+    assert owners[str(write_dir/'keep')] == 'root'
+    assert (write_dir/'keep').stat().st_mode & 0o777 == 0o640
     assert (write_dir/'keep').read_text() == 'persistent\n'
     before = current.resolve()
     restarts = (host/'restarts').read_bytes()
-    conflict = root/'someone-elses-data'
-    conflict.mkdir()
+    not_directory = root/'not-a-directory'
+    not_directory.write_text('keep\n')
     linked = root/'linked-data'
     linked.symlink_to(write_dir, target_is_directory=True)
-    for invalid in (str(conflict), str(linked), str(linked/'child'), '/', 'relative', str(write_dir/'..')):
+    for invalid in (str(not_directory), str(linked), str(linked/'child'), '/', 'relative', str(write_dir/'..'), '', '#other'):
         (override/'WRITE_DIR').write_text(invalid + '\n')
         remote('deploy', 'demo', 'api', str(release/'api'), ok=False)
         assert current.resolve() == before

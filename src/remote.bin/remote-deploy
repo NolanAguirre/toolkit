@@ -15,7 +15,8 @@
 ## Otherwise record the registered checkout's HEAD at deploy time, not a proven build commit.
 ## Load services/<folder>/env-dir/production first; use env-dir/default for missing keys.
 ## Keep env files out of code artifacts; deployment transfers a private environment snapshot.
-## WRITE_DIR defaults to the service data directory; a custom directory must belong to its runner.
+## WRITE_DIR=#default (or unset) uses the service data directory; explicit paths are copied unchanged.
+## Create WRITE_DIR if missing and enforce runtime ownership and mode 700 on the directory itself.
 ##</help>
 set -e
 . "$REMOTE_BIN/../lib/remote.sh"

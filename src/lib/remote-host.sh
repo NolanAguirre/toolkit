@@ -190,10 +190,11 @@ prepare_write_directory() (
     done
     if [ -e "$write_dir" ]; then
         [ -d "$write_dir" ] || fail "WRITE_DIR is not a directory: $write_dir"
-        [ "$(file_owner "$write_dir")" = "$runtime" ] || fail "WRITE_DIR must be owned by $runtime: $write_dir (existing ownership was preserved)"
     else
-        make_directory "$write_dir" "$runtime" 700
+        mkdir -p "$write_dir"
     fi
+    chown "$runtime:$(id -gn "$runtime")" "$write_dir"
+    chmod 700 "$write_dir"
     s6-setuidgid "$runtime" sh -c '[ -r "$1" ] && [ -w "$1" ] && [ -x "$1" ]' sh "$write_dir" ||
         fail "$runtime needs read, write and traversal access to WRITE_DIR and traversal access to its parents: $write_dir"
 )
@@ -383,13 +384,21 @@ if [ "$#" -eq 3 ]; then
         atomic_to "$environment/$key" "root:$(id -gn "$runtime")" 640 cat "$file"
     done
 fi
-write_dir="$service_dir/data"
+write_dir='#default'
 if [ -f "$environment/WRITE_DIR" ]; then
     # Match envdir's first-line and trailing-whitespace rules when preparing the path.
     write_dir=$(sed -n '1{s/[[:blank:]]*$//;p;}' "$environment/WRITE_DIR")
 fi
-prepare_write_directory "$write_dir" "$runtime"
-atomic_to "$environment/WRITE_DIR" "root:$(id -gn "$runtime")" 640 printf '%s\n' "$write_dir"
+case "$write_dir" in
+    '#default')
+        write_dir="$service_dir/data"
+        prepare_write_directory "$write_dir" "$runtime"
+        atomic_to "$environment/WRITE_DIR" "root:$(id -gn "$runtime")" 640 printf '%s\n' "$write_dir"
+        ;;
+    *)
+        prepare_write_directory "$write_dir" "$runtime"
+        ;;
+esac
 chmod 750 "$environment"
 atomic_to "$metadata" "root:$root_group" 644 printf 'release\t%s\ncommit\t%s\ncommit_source\t%s\ndirty\t%s\narchive_sha256\t%s\ndeployed_at\t%s\n' \
     "${release##*/}" "$commit" "$commit_source" "$dirty" "$archive_hash" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
