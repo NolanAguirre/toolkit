@@ -1,8 +1,10 @@
 #!/bin/sh
 ##<help>
 ## service add - Scaffold a service beneath the current repository's services directory.
-## Usage: bootstrap service add <name> --type=<nodejs|node-ml|go|auth> [--support=http] [--support=fs] [--support=db] [--support=python]
+## Usage: bootstrap service add <name> --type=<empty|nodejs|node-ml|go|auth> [--support=http] [--support=fs] [--support=db] [--support=python]
 ## List type configuration with bootstrap service type ls. node-ml always includes python.
+## empty: env-dir and stub install/build/start Make rules; no language tools required.
+## Supports http, fs and db; rejects python. Fill in the Makefile before starting.
 ## --type=nodejs --support=python remains available for compatibility.
 ## auth: Node.js login service over PostgreSQL; always includes http and db, rejects fs and python.
 ## Requires services/openresty (bootstrap openresty add), no nginx configuration, and a fresh
@@ -14,6 +16,7 @@
 ## Node.js types run npm init -y. Go runs go mod init <name> and creates main.go.
 ## Create env-dir/default and env-dir/$USER with matching values.
 ## Include a simple Makefile with help, install, build and background start targets.
+## Environment values and Make rules are composed from shared template fragments.
 ## go: requires Go; supports http, fs and db, rejects python. Build bin/service with make build.
 ## The starter waits for shutdown; with http it serves GET /healthz using HOST and PORT.
 ## Go uses only the standard library; fs and db configure env values without adding drivers.
@@ -43,8 +46,9 @@
 ##</help>
 set -e
 . "$(dirname "$0")/../../lib/bootstrap.sh"
+. "$(dirname "$0")/../../lib/template.sh"
 if [ "$#" -lt 1 ]; then
-    bootstrap_error 'usage: bootstrap service add <name> --type=<nodejs|node-ml|go|auth> [--support=http] [--support=fs] [--support=db] [--support=python]'
+    bootstrap_error 'usage: bootstrap service add <name> --type=<empty|nodejs|node-ml|go|auth> [--support=http] [--support=fs] [--support=db] [--support=python]'
 fi
 name=$1
 shift
@@ -80,7 +84,7 @@ while [ "$#" -gt 0 ]; do
     case "$option" in
         --type)
             case "$value" in
-                nodejs|node-ml|go|auth)
+                empty|nodejs|node-ml|go|auth)
                     type=$value
                     ;;
                 *)
@@ -116,9 +120,9 @@ case "$type" in
         ;;
     nodejs)
         ;;
-    go)
+    empty|go)
         if [ "$python" = 1 ]; then
-            bootstrap_error '--type=go supports only --support=http, --support=fs and --support=db'
+            bootstrap_error "--type=$type supports only --support=http, --support=fs and --support=db"
         fi
         ;;
     auth)
@@ -129,13 +133,15 @@ case "$type" in
         db=1
         ;;
     *)
-        bootstrap_error '--type=nodejs, --type=node-ml, --type=go or --type=auth is required'
+        bootstrap_error '--type=empty, --type=nodejs, --type=node-ml, --type=go or --type=auth is required'
         ;;
 esac
 if [ -z "$USER" ] || [ "$USER" = . ] || [ "$USER" = .. ] || printf '%s\n' "$USER" | grep -q /; then
     bootstrap_error 'USER must be a nonempty directory name'
 fi
 case "$type" in
+    empty)
+        ;;
     go)
         command -v go >/dev/null 2>&1 || bootstrap_error 'go is required'
         ;;
@@ -257,20 +263,25 @@ pending=$(mktemp -d "$root/services/.service.XXXXXX")
 trap 'rm -rf -- "$pending"' 0
 trap 'exit 1' HUP INT TERM
 mkdir -p -- "$pending/$name/env-dir/default" "$pending/$name/env-dir/$USER"
+template=$(dirname "$0")/../template
+support="$template/service/support"
 if [ "$db" = 1 ]; then
-    printf '%s\n' "$db_value" > "$pending/$name/env-dir/default/$db_key"
+    TEMPLATE_DATABASE="$db_value" template_render "$support/db/$engine/$db_key" > "$pending/$name/env-dir/default/$db_key"
 fi
 if [ "$fs" = 1 ]; then
-    printf '%s\n' "${HOME%/}/.$name" > "$pending/$name/env-dir/default/WRITE_DIR"
+    TEMPLATE_HOME="${HOME%/}" TEMPLATE_NAME="$name" template_render "$support/fs/WRITE_DIR" > "$pending/$name/env-dir/default/WRITE_DIR"
 fi
 if [ "$python" = 1 ]; then
-    printf '%s\n' "/tmp/$domain/queues/$name" > "$pending/$name/env-dir/default/QUEUE_DIR"
-    printf '%s\n' "${GPU_LOCK_PATH:-/tmp/gpu.lock}" > "$pending/$name/env-dir/default/GPU_LOCK_PATH"
+    TEMPLATE_DOMAIN="$domain" TEMPLATE_NAME="$name" template_render "$support/python/QUEUE_DIR" > "$pending/$name/env-dir/default/QUEUE_DIR"
+    TEMPLATE_GPU_LOCK_PATH="${GPU_LOCK_PATH:-/tmp/gpu.lock}" template_render "$support/python/GPU_LOCK_PATH" > "$pending/$name/env-dir/default/GPU_LOCK_PATH"
 fi
-template=$(dirname "$0")/../template
 makefile=$type
+start_deps=
 case "$type" in
+    empty)
+        ;;
     go)
+        start_deps=build
         (cd -- "$pending/$name" && go mod init "$name") >&2
         cp -- "$template/go/main.go" "$pending/$name/main.go"
         if [ "$http" = 1 ]; then
@@ -293,7 +304,6 @@ if [ "$type" = auth ]; then
     (cd -- "$pending/$name" && npm install pg) >&2
 fi
 if [ "$python" = 1 ]; then
-    makefile=nodejs-python
     mkdir -p -- "$pending/$name/cli"
     cp -- "$template/python/fsqueue.py" "$template/python/consumer.py" "$template/python/requirements.txt" "$pending/$name/cli/"
     cp -- "$template/python/gitignore" "$pending/$name/.gitignore"
@@ -306,16 +316,42 @@ if [ "$python" = 1 ]; then
     fi
     printf '%s:%s\n%s-consumer:-\n' "$name" "$port_key" "$name" > "$pending/$name/remote-services"
 fi
-cat "$template/makefile/$makefile" > "$pending/$name/Makefile"
+# Assemble complete, editable Makefiles without runtime template dependencies.
+rules="$template/makefile/service"
+make_help=$(cat "$rules/$makefile/help")
+make_install=$(cat "$rules/$makefile/install")
+make_build=$(cat "$rules/$makefile/build")
+make_extra=
+if [ "$type" = empty ]; then
+    make_start=$(cat "$rules/empty/start")
+else
+    start_command=$(cat "$rules/$makefile/command")
+    make_start=$(TEMPLATE_COMMAND="$start_command" template_render "$rules/background")
+fi
+if [ "$python" = 1 ]; then
+    make_extra=$(TEMPLATE_INSTALL_JS="$make_install" template_render "$rules/python/targets")
+    python_help=$(cat "$rules/python/help")
+    python_install=$(cat "$rules/python/install")
+    make_help="$make_help
+$python_help"
+    make_install="$make_install
+$python_install"
+fi
+TEMPLATE_HELP="$make_help" TEMPLATE_INSTALL="$make_install" TEMPLATE_BUILD="$make_build" \
+    TEMPLATE_START_DEPS="$start_deps" TEMPLATE_START="$make_start" TEMPLATE_EXTRA="$make_extra" \
+    template_render "$rules/base" > "$pending/$name/Makefile"
 if [ "$http" = 1 ]; then
     # The child acquires the port lock while our parent retains the bootstrap lock.
     port=$(port allocate pull "$domain" -n "services/$name" -m "$domain/services/$name")
-    printf '%s\n' "$port" > "$pending/$name/env-dir/default/PORT"
-    printf '%s\n' localhost > "$pending/$name/env-dir/default/HOST"
+    TEMPLATE_PORT="$port" template_render "$support/http/PORT" > "$pending/$name/env-dir/default/PORT"
+    host=localhost
+    if [ "$type" = auth ]; then
+        # OpenResty proxies to 127.0.0.1; localhost may resolve to ::1 for Node.
+        host=127.0.0.1
+    fi
+    TEMPLATE_HOST="$host" template_render "$support/http/HOST" > "$pending/$name/env-dir/default/HOST"
 fi
 if [ "$type" = auth ]; then
-    # OpenResty proxies to 127.0.0.1; localhost may resolve to ::1 for Node.
-    printf '%s\n' 127.0.0.1 > "$pending/$name/env-dir/default/HOST"
     sed "s/__PORT__/$port/g" "$template/auth/route.conf" > "$pending/route.conf"
 fi
 if [ "$USER" != default ]; then

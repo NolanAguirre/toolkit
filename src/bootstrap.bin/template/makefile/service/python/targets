@@ -1,0 +1,13 @@
+
+.PHONY: install.js install.python consumer
+
+install.js:
+__INSTALL_JS__
+
+install.python:
+	python3 -m venv cli/.venv
+	cli/.venv/bin/pip install --upgrade pip
+	cli/.venv/bin/pip install -r cli/requirements.txt
+
+consumer:
+	envdir "./env-dir/$${ENV_USER:-$$USER}" cli/.venv/bin/python3 cli/consumer.py

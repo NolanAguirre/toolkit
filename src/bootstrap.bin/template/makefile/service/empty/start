@@ -1,0 +1,3 @@
+	# TODO: envdir "./env-dir/$${ENV_USER:-$$USER}" <service command>
+	@echo "Set the start recipe in this Makefile before starting the service." >&2
+	@exit 1

@@ -5,6 +5,7 @@
 ## Print TSV with a header: type, label, options, required, description.
 ## Options and required are comma-separated; - means none. Required options are automatic.
 ## Optional support is off by default in the CLI. The dashboard initially selects HTTP.
+## Empty creates environment directories and stub Make rules without language tools.
 ## Node ML is Node.js plus the required Python ML consumer scaffold.
 ## Auth is a Node.js login service over PostgreSQL; it needs OpenResty and a fresh database.
 ##</help>
@@ -19,4 +20,5 @@ nodejs	Node.js	http,fs,db	-	Creates the Node.js package and environment files. A
 node-ml	Node ML (Node.js + Python)	http,fs,db,python	python	Creates the Node.js package, Python consumer, filesystem queue helpers and environment files. Add application and ML code before starting it.
 go	Go	http,fs,db	-	Creates a Go module, runnable service and environment files. HTTP adds a /healthz endpoint using the standard library.
 auth	Auth (Node.js + PostgreSQL + OpenResty)	http,db	http,db	Creates the login service, auth migration and OpenResty routes. Run bootstrap openresty add and bootstrap db add <name> --support=postgres first.
+empty	Empty	http,fs,db	-	Creates environment directories and stub install/build/start Make rules. Add your commands before starting it; no language tools are required.
 TYPES

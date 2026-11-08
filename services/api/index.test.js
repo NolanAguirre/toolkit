@@ -87,7 +87,9 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
 
   await t.test('service types enforce the Python scaffold for Node ML', async () => {
     const config = await (await get('/api/config')).json()
-    assert.deepEqual(Object.keys(config.serviceTypes), ['nodejs', 'node-ml', 'go', 'auth'])
+    assert.deepEqual(Object.keys(config.serviceTypes), ['nodejs', 'node-ml', 'go', 'auth', 'empty'])
+    assert.deepEqual(config.serviceTypes.empty.options, ['http', 'fs', 'db'])
+    assert.deepEqual(config.serviceTypes.empty.required, [])
     assert.deepEqual(config.serviceTypes.go.options, ['http', 'fs', 'db'])
     assert.deepEqual(config.serviceTypes.go.required, [])
     assert.deepEqual(config.serviceTypes.nodejs.required, [])
@@ -110,10 +112,25 @@ test('REST bootstrap workflows use real shell commands and isolated state', asyn
     assert.ok(existsSync(path.join(directory, 'imported/services/ml-http/env-dir/default/PORT')))
     for (const body of [
       { type: 'unknown' }, { type: null }, { type: 'nodejs', support: ['python'] },
+      { type: 'empty', support: ['python'] },
       { type: 'node-ml', support: ['unknown'] }, { type: 'node-ml', support: ['python', 'python'] },
     ]) {
       assert.equal((await post('/api/repos/imported/services', { name: 'invalid', ...body })).status, 400)
       assert.equal(existsSync(path.join(directory, 'imported/services/invalid')), false)
+    }
+  })
+
+  await t.test('creates an empty service with shared environment options', async () => {
+    const database = await post('/api/repos/imported/databases', { name: 'blank', support: ['sqlite'] })
+    assert.equal(database.status, 201, JSON.stringify(await database.clone().json()))
+    const service = await post('/api/repos/imported/services', { name: 'blank', type: 'empty', support: ['http', 'fs', 'db'] })
+    assert.equal(service.status, 201, JSON.stringify(await service.clone().json()))
+    const servicePath = path.join(directory, 'imported/services/blank')
+    assert.deepEqual(readdirSync(servicePath).sort(), ['Makefile', 'env-dir'])
+    assert.equal(readFileSync(path.join(servicePath, 'env-dir/default/DB_FILE'), 'utf8').trim(), path.join(directory, 'imported/db/blank/blank.sqlite'))
+    assert.equal(readFileSync(path.join(servicePath, 'env-dir/default/WRITE_DIR'), 'utf8').trim(), path.join(process.env.HOME, '.blank'))
+    for (const key of ['HOST', 'PORT', 'DB_FILE', 'WRITE_DIR']) {
+      assert.equal(readFileSync(path.join(servicePath, 'env-dir/tester', key), 'utf8'), readFileSync(path.join(servicePath, 'env-dir/default', key), 'utf8'))
     }
   })
 

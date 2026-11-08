@@ -1,5 +1,6 @@
 """Service scaffolding and foreground launchers in disposable local state."""
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,6 +32,7 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     assert configs['nodejs'][2:4] == ['http,fs,db', '-']
     assert configs['node-ml'][2:4] == ['http,fs,db,python', 'python']
     assert configs['go'][2:4] == ['http,fs,db', '-']
+    assert configs['empty'][2:4] == ['http,fs,db', '-']
     call('bootstrap', 'service', 'type', 'ls', 'unexpected', ok=False)
     fresh = root/'fresh'
     (fresh/'services').mkdir(parents=True)
@@ -112,6 +114,73 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     call('bootstrap', 'service', 'add', 'failedgo', '--type=go', cwd=fresh, ok=False)
     assert not (fresh/'services/failedgo').exists()
     assert not list((fresh/'services').glob('.service.*'))
+
+    # Empty scaffolds must not invoke either failing language toolchain.
+    call('bootstrap', 'service', 'add', 'blank', '--type=empty', cwd=fresh)
+    blank = fresh/'services/blank'
+    assert sorted(file.name for file in blank.iterdir()) == ['Makefile', 'env-dir']
+    assert list((blank/'env-dir/default').iterdir()) == []
+    assert (blank/'env-dir/tester').is_dir()
+    subprocess.run(['make', 'install', 'build'], cwd=blank, env=env,
+                   capture_output=True, text=True, check=True)
+    start = subprocess.run(['make', 'start'], cwd=blank, env=env,
+                           capture_output=True, text=True)
+    assert start.returncode != 0
+    assert 'Set the start recipe' in start.stderr
+    assert not (blank/'start.log').exists()
+    for name, backend, key, value in (
+        ('empty_pg', 'postgres', 'DATABASE_URL', 'postgresql://postgres@localhost:5432/empty_pg'),
+        ('empty_lite', 'sqlite', 'DB_FILE', str(fresh/'db/empty_lite/empty_lite.sqlite')),
+    ):
+        call('bootstrap', 'db', 'add', name, f'--support={backend}', cwd=fresh)
+        call('bootstrap', 'service', 'add', name, '--type', 'empty', '--support', 'http',
+             '--support=fs', '--support=db', cwd=fresh)
+        service = fresh/'services'/name
+        assert sorted(file.name for file in service.iterdir()) == ['Makefile', 'env-dir']
+        defaults = service/'env-dir/default'
+        assert sorted(file.name for file in defaults.iterdir()) == [key, 'HOST', 'PORT', 'WRITE_DIR']
+        assert (defaults/key).read_text() == value + '\n'
+        assert (defaults/'WRITE_DIR').read_text() == str(root/'home'/f'.{name}') + '\n'
+        assert (defaults/'HOST').read_text() == 'localhost\n'
+        assert (defaults/'PORT').read_text().strip().isdigit()
+        for file in defaults.iterdir():
+            assert (service/'env-dir/tester'/file.name).read_bytes() == file.read_bytes()
+
+    # Template values are literal, even with metacharacters and placeholder text.
+    previous_home = env['HOME']
+    env['HOME'] = str(root/'literal & \\ __NAME__ $HOME')
+    call('bootstrap', 'service', 'add', 'literal', '--type=empty', '--support=fs', cwd=fresh)
+    assert (fresh/'services/literal/env-dir/default/WRITE_DIR').read_text() == env['HOME'] + '/.literal\n'
+    env['HOME'] = previous_home
+    call('bootstrap', 'service', 'add', 'empty_python', '--type=empty', '--support=python', cwd=fresh, ok=False)
+    call('bootstrap', 'service', 'add', 'empty_missing', '--type=empty', '--support=db', cwd=fresh, ok=False)
+    assert not (fresh/'services/empty_python').exists()
+    assert not (fresh/'services/empty_missing').exists()
+    before = (blank/'Makefile').read_bytes()
+    call('bootstrap', 'service', 'add', 'blank', '--type=empty', cwd=fresh, ok=False)
+    assert (blank/'Makefile').read_bytes() == before
+
+    # Missing fragments fail in staging, before reserving an HTTP port.
+    fragment = installed/'bootstrap.bin/template/makefile/service/empty/build'
+    fragment.rename(fragment.with_name('build.saved'))
+    port_records = root/'global/ports/allocate/ports'
+    before = port_records.read_bytes()
+    call('bootstrap', 'service', 'add', 'empty_failed', '--type=empty', '--support=http', cwd=fresh, ok=False)
+    assert not (fresh/'services/empty_failed').exists()
+    assert port_records.read_bytes() == before
+    fragment.with_name('build.saved').rename(fragment)
+
+    # The bootstrap lock serializes duplicate additions and preserves the winner.
+    def add_empty():
+        return subprocess.run([str(installed/'bootstrap'), 'service', 'add', 'empty_race',
+                               '--type=empty', '--support=http'], cwd=fresh, env=env,
+                              text=True, capture_output=True, timeout=20)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: add_empty(), range(2)))
+    assert sorted(result.returncode == 0 for result in results) == [False, True]
+    assert (fresh/'services/empty_race/env-dir/default/PORT').is_file()
+    assert not list((fresh/'services').glob('.service.*'))
     npm.write_text('#!/bin/sh\nexit 0\n')
 
     # Auth services need OpenResty, no nginx, and a fresh PostgreSQL database.
@@ -181,6 +250,24 @@ with tempfile.TemporaryDirectory(prefix='toolkit-bootstrap-service-') as tmp:
     before = route
     add_auth()
     assert (site/'services/openresty/routes/auth.conf').read_text() == before
+
+    # Composed rules preserve each runtime and the optional Python install step.
+    for service, expected in (
+        (fresh/'services/new', ['npm install', 'npm run build --if-present', 'npm start']),
+        (tagger, ['npm install', 'python3 -m venv cli/.venv', 'npm run build --if-present', 'npm start']),
+        (worker, ['go mod download', 'go build -o bin/service .', './bin/service']),
+        (auth, ['npm install', 'npm run build --if-present', 'npm start']),
+    ):
+        output = subprocess.check_output(['make', '--no-print-directory', '-n', 'install', 'build', 'start'],
+                                         cwd=service, env=env, text=True)
+        positions = [output.index(command) for command in expected]
+        assert positions == sorted(positions), output
+        assert 'envdir "./env-dir/${ENV_USER:-$USER}"' in output
+        assert 'pid $!' in output
+        assert '__INSTALL__' not in (service/'Makefile').read_text()
+    output = subprocess.check_output(['make', '--no-print-directory', '-n', 'install.js', 'consumer'],
+                                     cwd=tagger, env=env, text=True)
+    assert output.splitlines() == ['npm install', 'envdir "./env-dir/${ENV_USER:-$USER}" cli/.venv/bin/python3 cli/consumer.py']
 
     # Optional live check of the migration against a disposable database.
     if shutil.which('psql') and subprocess.run(['psql', '-h', 'localhost', '-U', 'postgres', '-Atc', 'select 1'],

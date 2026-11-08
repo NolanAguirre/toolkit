@@ -1,0 +1,3 @@
+	@echo "  install   Install dependencies"
+	@echo "  build     Run the build script, if configured"
+	@echo "  start     Start the service in the background"

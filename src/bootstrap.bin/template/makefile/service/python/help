@@ -1,0 +1,3 @@
+	@echo "  install.js      Install node dependencies only"
+	@echo "  install.python  Create cli/.venv and install cli/requirements.txt"
+	@echo "  consumer        Drain the filesystem queue in the foreground"

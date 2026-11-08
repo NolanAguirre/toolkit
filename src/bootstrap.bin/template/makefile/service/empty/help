@@ -1,0 +1,3 @@
+	@echo "  install   Stub: add dependency installation"
+	@echo "  build     Stub: add build commands"
+	@echo "  start     Stub: add a service launch command"

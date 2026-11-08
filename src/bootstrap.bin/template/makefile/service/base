@@ -1,0 +1,17 @@
+.DEFAULT_GOAL := help
+.PHONY: install build start help
+
+help:
+	@echo "Available commands:"
+__HELP__
+	@echo "  help      Show this help message"
+
+install:
+__INSTALL__
+
+build:
+__BUILD__
+
+start: __START_DEPS__
+__START__
+__EXTRA__

@@ -1,0 +1,3 @@
+	@echo "  install   Download Go dependencies"
+	@echo "  build     Build bin/service"
+	@echo "  start     Build and start the service in the background"
