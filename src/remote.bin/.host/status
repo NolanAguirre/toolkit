@@ -33,14 +33,24 @@ for entry in "$@"; do
         result=1
         continue
     fi
-    if ! (require_file_target "$base/env/PORT" && require_file_target "$base/down"); then
+    environment="$base/env"
+    selected=$(CDPATH= cd "$base/server/current" 2>/dev/null && pwd -P) || selected=
+    case "$selected" in
+        "$base"/server/server-*)
+            snapshot="$base/releases/${selected##*/}.env"
+            if [ -d "$snapshot" ] && [ ! -L "$snapshot" ]; then
+                environment=$snapshot
+            fi
+            ;;
+    esac
+    if ! (require_file_target "$environment/PORT" && require_file_target "$base/down"); then
         printf '%s\tinvalid-service-files\t-\t%s\n' "$service" "$port"
         result=1
         continue
     fi
     actual=-
-    if [ -f "$base/env/PORT" ]; then
-        actual=$(cat "$base/env/PORT")
+    if [ -s "$environment/PORT" ]; then
+        actual=$(cat "$environment/PORT")
     fi
     if [ "$actual" != "$port" ]; then
         printf '%s\tport-drift\t-\t%s\n' "$service" "$port"

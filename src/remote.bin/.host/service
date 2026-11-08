@@ -36,7 +36,8 @@ exec 2>&1
 exec s6-envdir ./env s6-setuidgid '$runtime' ./server/current/run
 RUN
 )
-    if [ ! -f "$base/run" ] || [ "$(cat "$base/run")" = "$old_runner" ]; then
+    previous_runner=$(service_run_script legacy)
+    if [ ! -f "$base/run" ] || [ "$(cat "$base/run")" = "$old_runner" ] || [ "$(cat "$base/run")" = "$previous_runner" ]; then
         atomic_to "$base/run" "root:$root_group" 755 service_run_script
     fi
     atomic_to "$base/log/run" "root:$root_group" 755 cat <<RUN

@@ -24,6 +24,8 @@ help:
 # A source folder's remote-services may declare several deployment names.
 # Package each separately; copy run-consumer as the worker artifact's run.
 # Remote calls the generated /var/service-dir/<repo>-<service>/bin/deploy commands.
+# Remote loads env-dir/default plus env-dir/production from each source service.
+# Keep environment files out of artifacts; WRITE_DIR is prepared for the runtime user.
 # Host maintenance targets below are explicit app operations, not invoked by remote deploy.
 build:
 	./build

@@ -16,6 +16,8 @@ for entry in "$@"; do
     require_file_target "$base/bin/deploy-prepare"
     [ -x "$base/bin/deploy" ] || fail "run remote setup service for $service first"
     grep -q '^# toolkit-release-metadata-v1$' "$base/bin/deploy" || fail "update $service with remote setup service before deploying release metadata"
+    grep -q '^# toolkit-production-env-v1$' "$base/bin/deploy" || fail "update $service with remote setup service before deploying production env"
+    grep -q '^# toolkit-production-env-v1$' "$base/run" || fail "update $service with remote setup service; custom runners must load the release environment"
     s6-svok "$base" || fail "run remote setup supervision for $service first"
 done
 incoming=$(mktemp -d /tmp/toolkit-deploy.XXXXXX)
@@ -27,9 +29,10 @@ for entry in "$@"; do
     service_names "$entry"
     [ -f "$incoming/$service.tar.gz" ] && [ ! -L "$incoming/$service.tar.gz" ] || fail "missing artifact for $service"
     [ -f "$incoming/$service.release" ] && [ ! -L "$incoming/$service.release" ] || fail "missing metadata for $service"
+    [ -d "$incoming/$service.env" ] && [ ! -L "$incoming/$service.env" ] || fail "missing environment for $service"
 done
 for entry in "$@"; do
     service_names "$entry"
-    "$base/bin/deploy" "$incoming/$service.tar.gz" "$incoming/$service.release"
+    "$base/bin/deploy" "$incoming/$service.tar.gz" "$incoming/$service.release" "$incoming/$service.env"
     printf '%s\tdeployed\t%s\n' "$service" "$base/server/current"
 done

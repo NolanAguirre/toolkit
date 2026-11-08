@@ -222,9 +222,11 @@ case "$action" in
 esac
 REMOTE_MANIFEST=$(mktemp "$REMOTE_STATE/.services.XXXXXX")
 REMOTE_TARGETS=
-trap 'rm -f -- "$REMOTE_MANIFEST" ${REMOTE_TARGETS:+"$REMOTE_TARGETS"}' 0
+REMOTE_SOURCES=
+trap 'rm -f -- "$REMOTE_MANIFEST" ${REMOTE_TARGETS:+"$REMOTE_TARGETS"}; [ -z "$REMOTE_SOURCES" ] || rm -rf -- "$REMOTE_SOURCES"' 0
 trap 'exit 1' HUP INT TERM
 REMOTE_TARGETS=$(mktemp "$REMOTE_STATE/.targets.XXXXXX")
+REMOTE_SOURCES=$(mktemp -d "$REMOTE_STATE/.sources.XXXXXX")
 # Every selected target must exist and load before any SSH.
 remote_targets_select "$REMOTE_TO"
 command -v ssh >/dev/null 2>&1 || remote_error 'ssh is required'
@@ -237,8 +239,8 @@ if [ "$action" = remote-deploy ] && [ "$#" -eq 3 ]; then
     selected=$2
     remote_token "$selected" || remote_error 'invalid service name'
 fi
-env_user=${ENV_USER:-${USER:-default}}
-remote_token "$env_user" || remote_error 'ENV_USER must be a simple directory name'
+# Remote services always use production settings, independent of the deployer's login.
+env_user=production
 for directory in "$root"/services/*; do
     [ -d "$directory" ] || continue
     [ ! -L "$directory" ] || remote_error "service symlinks are not supported: $directory"
@@ -313,6 +315,7 @@ for directory in "$root"/services/*; do
                 fi
             fi
             printf '%s:%s\n' "$service" "$port"
+            printf '%s\n' "$directory" > "$REMOTE_SOURCES/$service"
             count=$((count + 1))
         done
         [ "$count" -gt 0 ] || remote_error "no services in $declarations"
@@ -331,6 +334,6 @@ if [ "$selected" != --all ]; then
 fi
 [ -s "$REMOTE_MANIFEST" ] || remote_error 'no matching services in repository'
 
-export REMOTE_MANIFEST REMOTE_TARGETS
+export REMOTE_MANIFEST REMOTE_TARGETS REMOTE_SOURCES
 # Keep the locks and cleanup trap in this parent until SSH and all children exit.
 "$command" "$@"

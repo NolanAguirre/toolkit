@@ -167,6 +167,37 @@ release_value() {
     awk -F '\t' -v key="$2" '$1 == key { print $2 }' "$1"
 }
 
+# Prepare only the dedicated write directory, never recursively take over existing data.
+prepare_write_directory() (
+    write_dir=$1
+    runtime=$2
+    case "$write_dir" in
+        ''|/|*/|*//*|*/./*|*/../*|*/.|*/..)
+            fail 'WRITE_DIR must be an absolute directory without dot components or trailing slashes'
+            ;;
+        /*)
+            ;;
+        *)
+            fail 'WRITE_DIR must be an absolute directory'
+            ;;
+    esac
+    [ "$(printf '%s' "$write_dir" | LC_ALL=C tr -d '[:cntrl:]')" = "$write_dir" ] || fail 'WRITE_DIR contains control characters'
+    parent=$write_dir
+    while [ "$parent" != / ]; do
+        [ ! -L "$parent" ] || fail "WRITE_DIR must not traverse a symlink: $parent"
+        parent=${parent%/*}
+        [ -n "$parent" ] || parent=/
+    done
+    if [ -e "$write_dir" ]; then
+        [ -d "$write_dir" ] || fail "WRITE_DIR is not a directory: $write_dir"
+        [ "$(file_owner "$write_dir")" = "$runtime" ] || fail "WRITE_DIR must be owned by $runtime: $write_dir (existing ownership was preserved)"
+    else
+        make_directory "$write_dir" "$runtime" 700
+    fi
+    s6-setuidgid "$runtime" sh -c '[ -r "$1" ] && [ -w "$1" ] && [ -x "$1" ]' sh "$write_dir" ||
+        fail "$runtime needs read, write and traversal access to WRITE_DIR and traversal access to its parents: $write_dir"
+)
+
 service_run_script() {
     printf '#!/bin/sh\n# toolkit-release-run-v1\nset -e\nservice_dir=%s\nruntime=%s\n' "$base" "$runtime"
     cat <<'RUN'
@@ -200,13 +231,26 @@ printf 'pid\t%s\nprocess_start\t%s\n' "$$" "$identity" >> "$record"
 atomic_to "$service_dir/running-release" "root:$root_group" 644 cat "$record"
 rm -f "$record"
 trap - 0 HUP INT TERM
+RUN
+    # Emit the previous runner exactly when checking whether an upgrade is safe.
+    if [ "${1:-}" != legacy ]; then
+        cat <<'RUN'
+# toolkit-production-env-v1
+environment="$service_dir/releases/${release##*/}.env"
+if [ -d "$environment" ]; then
+    # Load checkout values only after dropping privileges, including PATH and loader settings.
+    exec s6-envdir "$service_dir/env" s6-setuidgid "$runtime" s6-envdir "$environment" "$release/run"
+fi
+RUN
+    fi
+    cat <<'RUN'
 exec s6-envdir "$service_dir/env" s6-setuidgid "$runtime" "$release/run"
 RUN
 }
 
 # Emit the root-owned, service-local deployment command.
 service_deploy_script() {
-    printf '#!/bin/sh\n# toolkit-release-metadata-v1\nset -e\nservice_dir=%s\nservice_owner=%s\n' "$base" "$owner"
+    printf '#!/bin/sh\n# toolkit-release-metadata-v1\n# toolkit-production-env-v1\nset -e\nservice_dir=%s\nservice_owner=%s\nruntime=%s\n' "$base" "$owner" "$runtime"
     cat <<'DEPLOY'
 . "$service_dir/bin/toolkit-host.sh"
 case "${1:-}" in
@@ -258,7 +302,7 @@ case "${1:-}" in
         exit 0
         ;;
 esac
-[ "$#" -eq 1 ] || [ "$#" -eq 2 ] || fail "usage: $0 tarball [metadata]"
+[ "$#" -ge 1 ] && [ "$#" -le 3 ] || fail "usage: $0 tarball [metadata [env-directory]]"
 [ "$(id -u)" -eq 0 ] || fail 'run the deployment command as root'
 if [ "${TOOLKIT_REMOTE_LOCKED:-}" != 1 ]; then
     [ ! -L /var/run/toolkit-remote.lock ] || fail 'host lock must not be a symlink'
@@ -278,7 +322,7 @@ esac
 commit=unknown
 commit_source=unknown
 dirty=unknown
-if [ "$#" -eq 2 ]; then
+if [ "$#" -ge 2 ]; then
     [ -f "$2" ] && [ ! -L "$2" ] || fail 'metadata must be a regular file'
     [ "$(wc -l < "$2" | tr -d ' ')" = 4 ] || fail 'invalid release metadata'
     commit=$(release_value "$2" commit)
@@ -322,10 +366,43 @@ case "$release" in
         ;;
 esac
 metadata="$service_dir/releases/${release##*/}"
+environment="$metadata.env"
+mkdir -m 700 "$environment"
+chown "root:$(id -gn "$runtime")" "$environment"
+if [ "$#" -eq 3 ]; then
+    [ -d "$3" ] && [ ! -L "$3" ] || fail 'environment must be a real directory'
+    for file in "$3"/* "$3"/.[!.]* "$3"/..?*; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        key=${file##*/}
+        case "$key" in
+            ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*)
+                fail "invalid environment key: $key"
+                ;;
+        esac
+        [ -f "$file" ] && [ ! -L "$file" ] || fail "expected a regular environment file: $file"
+        atomic_to "$environment/$key" "root:$(id -gn "$runtime")" 640 cat "$file"
+    done
+fi
+write_dir="$service_dir/data"
+if [ -f "$environment/WRITE_DIR" ]; then
+    # Match envdir's first-line and trailing-whitespace rules when preparing the path.
+    write_dir=$(sed -n '1{s/[[:blank:]]*$//;p;}' "$environment/WRITE_DIR")
+fi
+prepare_write_directory "$write_dir" "$runtime"
+atomic_to "$environment/WRITE_DIR" "root:$(id -gn "$runtime")" 640 printf '%s\n' "$write_dir"
+chmod 750 "$environment"
 atomic_to "$metadata" "root:$root_group" 644 printf 'release\t%s\ncommit\t%s\ncommit_source\t%s\ndirty\t%s\narchive_sha256\t%s\ndeployed_at\t%s\n' \
     "${release##*/}" "$commit" "$commit_source" "$dirty" "$archive_hash" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 s6-setuidgid "$service_owner" "$0" --activate "$release"
 atomic_to "$service_dir/release" "root:$root_group" 644 cat "$metadata"
+# Environment snapshots follow the same release retention policy as code.
+for previous_env in "$service_dir/releases"/server-*.env; do
+    [ -d "$previous_env" ] && [ ! -L "$previous_env" ] || continue
+    previous=${previous_env##*/}
+    if [ ! -d "$service_dir/server/${previous%.env}" ]; then
+        rm -rf "$previous_env"
+    fi
+done
 s6-svc -t "$service_dir"
 printf '%s\n' "$release"
 DEPLOY

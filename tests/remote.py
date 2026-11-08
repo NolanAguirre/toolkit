@@ -75,6 +75,7 @@ elif cmd == 's6-setlock':
     os.execvp(a[3], a[3:])
 elif cmd == 's6-setuidgid':
     assert a[0] in users
+    if a[1] == 'sh' and os.environ.get('FAIL_WRITE_ACCESS'): sys.exit(1)
     os.environ['MOCK_CURRENT_USER'] = a[0]
     os.execvp(a[1], a[1:])
 elif cmd == 's6-svok':
@@ -143,6 +144,12 @@ elif cmd == 's6-svstat':
     elif (path/'down').exists() or not (path/'server/current/run').exists(): print('down 10 seconds, normally down')
     else: print('up (pid 124) 10 seconds')
 elif cmd == 's6-envdir':
+    for path in pathlib.Path(a[0]).iterdir():
+        data = path.read_bytes()
+        if not data:
+            os.environ.pop(path.name, None)
+        else:
+            os.environ[path.name] = data.split(b'\\n', 1)[0].rstrip(b' \\t').replace(b'\\0', b'\\n').decode()
     os.execvp(a[1], a[1:])
 elif cmd == 'sha256':
     import hashlib
@@ -386,10 +393,19 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     assert 'port-drift' in remote('status', 'demo', ok=False)
     remote('setup', 'service', 'demo', 'api')
     assert (base('api')/'env/PORT').read_text() == '8001\n'
-    # A developer's override follows bootstrap's PORT selection.
+    # Deployment ignores the developer's directory, even if its port is invalid.
     override = repo/'services/api/env-dir/tester'
     override.mkdir()
+    (override/'PORT').write_text('bad\n')
+    remote('setup', 'service', 'demo', 'api')
+    assert (base('api')/'env/PORT').read_text() == '8001\n'
+    override = repo/'services/api/env-dir/production'
+    override.mkdir()
     (override/'PORT').write_text('8002\n')
+    (override/'HOST').write_text('production.example\n')
+    (override/'EMPTY_VALUE').write_text('')
+    (repo/'services/api/env-dir/default/HOST').write_text('localhost\n')
+    (repo/'services/api/env-dir/default/FALLBACK').write_text('default-value\n')
     remote('setup', 'service', 'demo', 'api')
     assert (base('api')/'env/PORT').read_text() == '8002\n'
     (override/'PORT').write_text('bad\n')
@@ -428,7 +444,7 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     for name in ('api', 'dns'):
         artifact = release/name
         artifact.mkdir(parents=True)
-        (artifact/'run').write_text('#!/bin/sh\nexec sleep 1000\n')
+        (artifact/'run').write_text('#!/bin/sh\nprintf "%s\\n" "$HOST" "$FALLBACK" "$ENV_USER" "$PORT" "${EMPTY_VALUE-unset}" > "$WRITE_DIR/runtime-env"\nexec sleep 1000\n')
         (artifact/'run').chmod(0o755)
         (artifact/'private.js').write_text('// application code\n')
         (artifact/'private.js').chmod(0o600)
@@ -461,16 +477,25 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     assert dns_metadata['dirty'] == 'true'
     assert (api/'releases'/published.name).read_bytes() == (api/'release').read_bytes()
     assert (api/'release').stat().st_mode & 0o777 == 0o644
+    snapshot = api/'releases'/f'{published.name}.env'
+    assert (snapshot/'HOST').read_text() == 'production.example\n'
+    assert (snapshot/'FALLBACK').read_text() == 'default-value\n'
+    assert (snapshot/'WRITE_DIR').read_text() == str(api/'data') + '\n'
+    assert snapshot.stat().st_mode & 0o777 == 0o750
+    assert (snapshot/'HOST').stat().st_mode & 0o777 == 0o640
+    assert not list(published.glob('*.env'))
     # Run the real generated startup script, mocking only s6's privilege/env tools.
-    runtime_env = dict(env, PATH=str(mocks) + ':' + env['PATH'])
+    runtime_env = dict(env, PATH=str(mocks) + ':' + env['PATH'], EMPTY_VALUE='inherited')
     process = subprocess.Popen([str(api/'run')], cwd=api, env=runtime_env,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         deadline = time.monotonic() + 5
-        while not (api/'running-release').exists() and time.monotonic() < deadline:
+        while (not (api/'running-release').exists() or not (api/'data/runtime-env').exists()) and time.monotonic() < deadline:
             if process.poll() is not None:
                 raise AssertionError(process.communicate())
             time.sleep(.02)
+        assert (api/'data/runtime-env').read_text().splitlines() == [
+            'production.example', 'default-value', 'production', '8002', 'unset']
         running = dict(line.split('\t') for line in (api/'running-release').read_text().splitlines())
         assert running['pid'] == str(process.pid)
         assert running['archive_sha256'] == expected_hash
@@ -479,8 +504,14 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
         assert f'default\tapi\trunning\tarchive_sha256\t{expected_hash}' in status.splitlines()
         assert all(line.startswith('default\t') for line in status.splitlines())
         # Selecting a new release while the old process lives keeps its old identity.
+        (override/'HOST').write_text('next.example\n')
+        (override/'EMPTY_VALUE').unlink()
         remote('deploy', 'demo', 'api', str(release/'api'))
         assert current.resolve() != published
+        next_snapshot = api/'releases'/f'{current.resolve().name}.env'
+        assert (next_snapshot/'HOST').read_text() == 'next.example\n'
+        assert not (next_snapshot/'EMPTY_VALUE').exists()
+        assert (snapshot/'HOST').read_text() == 'production.example\n'
         status = remote('releases', 'demo', extra={'MOCK_SUPERVISED_PID': str(process.pid)})
         assert f'api\trunning\trelease\t{published.name}' in status
         assert f'api\tselected\trelease\t{current.resolve().name}' in status
@@ -495,6 +526,47 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
         process.communicate(timeout=5)
     assert 'api\truntime\tidentity\tnot-running' in remote('releases', 'demo')
     (api/'running-release').unlink()
+    # Prepare a dedicated custom path, preserve data on repeats, and reject unsafe paths.
+    write_dir = root/'custom data'
+    (override/'WRITE_DIR').write_text(str(write_dir) + '\n')
+    remote('deploy', 'demo', 'api', str(release/'api'))
+    owners = json.loads((host/'owners.json').read_text())
+    assert owners[str(write_dir)] == 'demo-api'
+    assert write_dir.stat().st_mode & 0o777 == 0o700
+    (write_dir/'keep').write_text('persistent\n')
+    remote('deploy', 'demo', 'api', str(release/'api'))
+    assert (write_dir/'keep').read_text() == 'persistent\n'
+    before = current.resolve()
+    restarts = (host/'restarts').read_bytes()
+    conflict = root/'someone-elses-data'
+    conflict.mkdir()
+    linked = root/'linked-data'
+    linked.symlink_to(write_dir, target_is_directory=True)
+    for invalid in (str(conflict), str(linked), str(linked/'child'), '/', 'relative', str(write_dir/'..')):
+        (override/'WRITE_DIR').write_text(invalid + '\n')
+        remote('deploy', 'demo', 'api', str(release/'api'), ok=False)
+        assert current.resolve() == before
+        assert (host/'restarts').read_bytes() == restarts
+    (override/'WRITE_DIR').write_text(str(write_dir) + '\n')
+    remote('deploy', 'demo', 'api', str(release/'api'), ok=False, extra={'FAIL_WRITE_ACCESS': '1'})
+    assert current.resolve() == before
+    (override/'WRITE_DIR').unlink()
+    # A deployed port comes from its snapshot, even when setup's old PORT remains.
+    (override/'PORT').write_text('8003\n')
+    remote('deploy', 'demo', 'api', str(release/'api'))
+    assert (api/'env/PORT').read_text() == '8002\n'
+    assert 'port-drift' not in remote('status', 'demo', ok=False)
+    (override/'PORT').write_text('8002\n')
+    # Reject invalid environment entries before opening SSH.
+    calls_before = (host/'ssh-calls').read_bytes()
+    (override/'BAD-NAME').write_text('value\n')
+    remote('deploy', 'demo', 'api', str(release/'api'), ok=False)
+    assert (host/'ssh-calls').read_bytes() == calls_before
+    (override/'BAD-NAME').unlink()
+    (override/'SECRET').symlink_to(write_dir/'keep')
+    remote('deploy', 'demo', 'api', str(release/'api'), ok=False)
+    assert (host/'ssh-calls').read_bytes() == calls_before
+    (override/'SECRET').unlink()
     # Hash mismatch and metadata publication failure cannot change the active release.
     before = current.resolve()
     before_metadata = (api/'release').read_bytes()
@@ -590,6 +662,9 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     remote('deploy', 'demo', 'api-consumer', str(worker_artifact))
     assert current.resolve() == api_before
     assert (worker/'server/current/run').is_file()
+    worker_env = worker/'releases'/f'{(worker/"server/current").resolve().name}.env'
+    assert (worker_env/'PORT').read_bytes() == b''
+    assert (worker_env/'HOST').read_text() == 'next.example\n'
     assert (host/'restarts').read_text() == restarts_before + str(worker) + '\n'
     # Bundles include both declared identities, and missing artifacts fail before SSH.
     (worker_artifact/'run').chmod(0o644)
@@ -598,7 +673,7 @@ sys.exit(subprocess.run(['sh', str(lib/'run'), *args], input=data, env=env).retu
     assert (host/'ssh-calls').read_bytes() == calls_before
     (worker_artifact/'run').chmod(0o755)
     remote('deploy', 'demo', str(release))
-    # Explicit port variables use the normal user/default lookup, delivered as PORT.
+    # Explicit port variables use production/default lookup, delivered as PORT.
     (repo/'services/api/env-dir/default/METRICS_PORT').write_text('8010\n')
     declarations.write_text('api:PORT\napi-consumer:METRICS_PORT\n')
     remote('setup', 'service', 'demo', 'api-consumer')

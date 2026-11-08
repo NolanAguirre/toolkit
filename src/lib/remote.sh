@@ -12,6 +12,24 @@ remote_token() {
     esac
 }
 
+# Copy one envdir layer as data; never evaluate its values as shell code.
+remote_copy_env() (
+    [ -e "$1" ] || [ -L "$1" ] || exit 0
+    [ -d "$1" ] && [ ! -L "$1" ] || remote_error "expected a real environment directory: $1"
+    for file in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        key=${file##*/}
+        case "$key" in
+            ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*)
+                remote_error "invalid environment key: $key"
+                ;;
+        esac
+        [ -f "$file" ] && [ ! -L "$file" ] || remote_error "expected a regular environment file: $file"
+        cat "$file" > "$2/$key"
+        chmod 600 "$2/$key"
+    done
+)
+
 # Connection values are data, never shell fragments or SSH options.
 remote_connection_validate() {
     case "$REMOTE_TARGET" in

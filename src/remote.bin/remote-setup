@@ -9,6 +9,7 @@
 ## Requires Linux or FreeBSD, s6 and the root runner from remote this setup-deploy on the host.
 ## Reuse an existing s6 scanner or start it with Linux systemd / FreeBSD rc.d.
 ## Applications and logs are always supervised by s6; setup transfers no application code.
+## Read assigned ports from production, falling back to default; ignore personal env directories.
 ##</help>
 set -e
 . "$REMOTE_BIN/../lib/remote.sh"

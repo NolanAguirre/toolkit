@@ -13,6 +13,9 @@
 ## Record archive SHA-256 and Git provenance beside the service run file.
 ## A service artifact may include .toolkit-commit containing its full build commit.
 ## Otherwise record the registered checkout's HEAD at deploy time, not a proven build commit.
+## Load services/<folder>/env-dir/default, then env-dir/production from the registered checkout.
+## Keep env files out of code artifacts; deployment transfers a private environment snapshot.
+## WRITE_DIR defaults to the service data directory; a custom directory must belong to its runner.
 ##</help>
 set -e
 . "$REMOTE_BIN/../lib/remote.sh"
@@ -47,6 +50,23 @@ while IFS= read -r entry; do
     [ -f "$source/run" ] && [ -x "$source/run" ] || remote_error "service artifact needs executable run: $source/run"
     special=$(find "$source" ! -type f ! -type d -print)
     [ -z "$special" ] || remote_error 'release may contain only regular files and directories'
+    env_source=$(cat "$REMOTE_SOURCES/$service")
+    env_source="$env_source/env-dir"
+    environment="$upload/$service.env"
+    mkdir "$environment"
+    # Explicit layers: production replaces defaults; no personal env directories are read.
+    if [ -e "$env_source" ] || [ -L "$env_source" ]; then
+        [ -d "$env_source" ] && [ ! -L "$env_source" ] || remote_error "expected a real env-dir: $env_source"
+        remote_copy_env "$env_source/default" "$environment"
+        remote_copy_env "$env_source/production" "$environment"
+    fi
+    # A multi-process source may assign PORT from a different key, or have no listener.
+    if [ "${entry##*:}" = - ]; then
+        : > "$environment/PORT"
+    else
+        printf '%s\n' "${entry##*:}" > "$environment/PORT"
+    fi
+    printf 'production\n' > "$environment/ENV_USER"
     commit=$checkout_commit
     commit_source=checkout-at-deploy
     dirty=$checkout_dirty
@@ -71,7 +91,7 @@ REMOTE_ARCHIVE="$upload/bundle.tar.gz"
 # Use the manifest rather than a wildcard that could include the bundle itself.
 set --
 while IFS= read -r entry; do
-    set -- "$@" "${entry%:*}.tar.gz" "${entry%:*}.release"
+    set -- "$@" "${entry%:*}.tar.gz" "${entry%:*}.release" "${entry%:*}.env"
 done < "$REMOTE_MANIFEST"
 tar -czf "$REMOTE_ARCHIVE" -C "$upload" "$@"
 remote_each deploy
