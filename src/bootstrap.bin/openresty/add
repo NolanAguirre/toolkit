@@ -133,7 +133,7 @@ rm -- "$path/env-dir/$env_user/PORT"
 rmdir -- "$path/env-dir/$env_user" "$path/env-dir" "$path"
 allocating=0
 printf '%s\n' localhost > "$app/env-dir/default/HOST"
-port allocate pull "$domain" -n services/memcached -m "$domain/services/memcached" > "$cache/env-dir/default/PORT"
+port allocate pull "$domain" -n services/memcached -m "$domain/services/memcached" --reuse > "$cache/env-dir/default/PORT"
 printf '%s\n' 127.0.0.1 > "$cache/env-dir/default/HOST"
 if [ "$env_user" != default ]; then
     cp -- "$app/env-dir/default/PORT" "$app/env-dir/default/HOST" "$app/env-dir/$env_user/"

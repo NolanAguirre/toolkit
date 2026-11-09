@@ -100,7 +100,7 @@ if [ "$library" = 1 ]; then
     printf '\n%s\n' "import 'component-library/dist/component-library.css'" >> "$app/src/main.jsx"
     cat "$template/library.md" >> "$app/README.md"
 fi
-port=$(port allocate pull "$domain" -n "ui/$name" -m "$domain/ui/$name")
+port=$(port allocate pull "$domain" -n "ui/$name" -m "$domain/ui/$name" --reuse)
 printf '%s\n' "$port" > "$app/env-dir/default/PORT"
 printf '%s\n' localhost > "$app/env-dir/default/HOST"
 if [ "$USER" != default ]; then

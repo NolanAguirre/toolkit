@@ -152,6 +152,26 @@ with tempfile.TemporaryDirectory() as tmp:
     named = repo('named')
     call('port', 'allocate', 'create', 'named')
     value = call('port', 'allocate', 'pull', 'named', '-n', 'services/api', '-m', 'keep me')
+    before = index.read_bytes()
+    metadata = root/'global/ports/allocate/named'/value
+    metadata_before = metadata.read_bytes()
+    call('port', 'allocate', 'pull', 'named', '-n', 'services/api', '-m', 'reject me', ok=False)
+    assert index.read_bytes() == before
+    assert metadata.read_bytes() == metadata_before
+    assert call('port', 'allocate', 'pull', 'named', '-n', 'services/api', '--reuse') == value
+    assert index.read_bytes() == before
+    assert metadata.read_bytes() == metadata_before
+    assert call('port', 'allocate', 'pull', 'named', '--reuse', '-n', 'services/api', '-m', 'updated') == value
+    assert index.read_bytes() == before
+    assert json.loads(metadata.read_text())['message'] == 'updated'
+    # Concurrent reuse requests create only one reservation for a new name.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(call, 'port', 'allocate', 'pull', 'named', '-n', 'services/worker', '--reuse')
+                   for _ in range(2)]
+        reused = [future.result() for future in futures]
+    assert reused[0] == reused[1]
+    assert reused[0] != value
+    assert len([r for r in records() if r['domain'] == 'named' and r['name'] == 'services/worker']) == 1
     portfile = named/'services/api/env-dir/default/PORT'
     portfile.write_text(value + '\n')
     before = index.read_bytes()

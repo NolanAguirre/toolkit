@@ -344,7 +344,7 @@ TEMPLATE_HELP="$make_help" TEMPLATE_INSTALL="$make_install" TEMPLATE_BUILD="$mak
     template_render "$rules/base" > "$pending/$name/Makefile"
 if [ "$http" = 1 ]; then
     # The child acquires the port lock while our parent retains the bootstrap lock.
-    port=$(port allocate pull "$domain" -n "services/$name" -m "$domain/services/$name")
+    port=$(port allocate pull "$domain" -n "services/$name" -m "$domain/services/$name" --reuse)
     TEMPLATE_PORT="$port" template_render "$support/http/PORT" > "$pending/$name/env-dir/default/PORT"
     host=localhost
     if [ "$type" = auth ]; then
